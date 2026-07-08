@@ -49,7 +49,7 @@ class DeviceSession:
         self.device_info = {}
         self.total_images_received = 0
         self.total_audio_received = 0
-        self.total_videos_received_videos_received = 0
+        self.total_videos_received = 0
         self.total_files_received = 0
         self.total_commands_processed = 0
         self.total_notifications_received = 0
