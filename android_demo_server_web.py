@@ -794,7 +794,7 @@ class DemoServer:
             with open(filelist_file, 'w') as f:
                 json.dump(files, f, indent=2)
             self.log(f"    [+] Saved to: {filelist_file}")
-            session.last_file_list = message
+            session.last_file_list = files
             self.log_to_file(message, session.address)
 
         elif msg_type == "storage_info":

@@ -221,10 +221,8 @@ function browseFiles(path) {
                     const container = document.getElementById('filebrowser-list');
                     const files = data.files || [];
                     if (!files.length) { container.innerHTML = '<p>No files returned. Make sure the device is connected and has granted storage permission.</p>'; return; }
-                    // Parse nested file_list message structure
+                    // Use files directly as returned by server
                     let items = files;
-                    if (data.files && Array.isArray(data.files.files)) items = data.files.files;
-                    if (Array.isArray(data.files) && data.files.length && Array.isArray(data.files[0].files)) items = data.files[0].files;
 
                     container.innerHTML = items.map(f => {
                         const isDir = f.is_dir || f.isDir || false;
