@@ -4,6 +4,7 @@ let pollingInterval = null;
 let currentReceivedDir = '';
 let selectedGalleryItem = null;
 let selectedFileItem = null;
+let currentDeviceSessionId = null; // ID of the currently selected device session
 const POLL_INTERVAL = 3000;
 
 document.addEventListener('DOMContentLoaded', () => {

