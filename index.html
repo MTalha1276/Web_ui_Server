@@ -18,6 +18,7 @@
         <button class="tab-btn" data-tab="filebrowser">File Browser</button>
         <button class="tab-btn" data-tab="received">Received Files</button>
         <button class="tab-btn" data-tab="data">Data Viewer</button>
+        <button class="tab-btn" data-tab="screenshot">Screenshot Gallery</button>
     </div>
 
     <!-- DASHBOARD TAB -->
@@ -116,6 +117,18 @@
             <button id="btn-view-device" class="btn">Device Info</button>
         </div>
         <div id="data-viewer" class="data-viewer"><p>Click a button above to view data. Make sure you've sent the corresponding command first.</p></div>
+    </div>
+
+    <!-- SCREENSHOT GALLERY TAB -->
+    <div class="tab-content" id="tab-screenshot">
+        <h2>Screenshot Gallery</h2>
+        <div class="tab-toolbar">
+            <button id="btn-refresh-screenshots" class="btn">Refresh</button>
+            <button id="btn-download-selected-screenshot" class="btn">Download Selected</button>
+            <button id="btn-delete-selected-screenshot" class="btn btn-danger">Delete Selected</button>
+            <span id="screenshot-status" class="status-text"></span>
+        </div>
+        <div id="screenshot-grid" class="gallery-grid"><p>No screenshots available. Take a screenshot from the dashboard first.</p></div>
     </div>
 
     <footer>
