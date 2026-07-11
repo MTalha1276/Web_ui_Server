@@ -213,71 +213,6 @@ header p { color: #8b949e; font-size: 0.8rem; }
 .received-item .ri-link { font-size: 0.75rem; color: #58a6ff; text-decoration: none; }
 .received-item .ri-link:hover { text-decoration: underline; }
 
-/* Screenshot gallery */
-.screenshot-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 0.75rem;
-    padding: 0.5rem 0;
-}
-
-.screenshot-item {
-    background-color: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 8px;
-    padding: 0.5rem;
-    cursor: pointer;
-    position: relative;
-    transition: all 0.15s;
-    text-align: center;
-}
-
-.screenshot-item:hover { border-color: #58a6ff; transform: translateY(-2px); }
-.screenshot-item.selected { border-color: #3fb950; background-color: #0d2818; }
-
-.screenshot-item img {
-    max-width: 100%;
-    height: auto;
-    border-radius: 6px;
-    margin-bottom: 0.5rem;
-}
-
-.screenshot-info {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.75rem;
-    color: #8b949e;
-}
-
-.screenshot-info .filename {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.screenshot-info .size {
-    font-size: 0.7rem;
-}
-
-.screenshot-item .delete-btn {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    background: rgba(248, 81, 73, 0.7);
-    color: white;
-    border: none;
-    border-radius: 3px;
-    padding: 2px 6px;
-    font-size: 0.7rem;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s;
-}
-
-.screenshot-item:hover .delete-btn {
-    opacity: 1;
-}
-
 /* Image preview modal */
 .image-modal {
     display: none;
@@ -290,19 +225,7 @@ header p { color: #8b949e; font-size: 0.8rem; }
 }
 
 .image-modal.show { display: flex; }
-.image-modal img { max-width: 90vh; max-height: 90vh; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
-.image-modal .image-info {
-    position: absolute;
-    bottom: 20px;
-    background: rgba(0,0,0,0.7);
-    color: white;
-    padding: 8px 12px;
-    border-radius: 4px;
-    font-size: 0.9rem;
-    text-align: center;
-    width: 80%;
-    max-width: 400px;
-}
+.image-modal img { max-width: 90%; max-height: 90%; border-radius: 8px; }
 .image-modal .close-btn { position: absolute; top: 20px; right: 30px; color: #fff; font-size: 2rem; cursor: pointer; }
 
 /* Data viewer */
