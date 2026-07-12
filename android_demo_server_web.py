@@ -47,6 +47,7 @@ class DeviceSession:
         self.connected = True
         self.last_heartbeat = time.time()
         self.device_info = {}
+        self.pending_file = None  # For incoming file transfers
         self.total_images_received = 0
         self.total_screenshots_received = 0
         self.total_audio_received = 0
@@ -516,7 +517,7 @@ class DemoServer:
 
                     idx = 0
                     while idx < len(combined):
-                        pending = session.device_info.get("pending_file")
+                        pending = session.pending_file
                         if pending:
                             # We are receiving a binary file
                             total_needed = pending["size"]
@@ -563,7 +564,7 @@ class DemoServer:
                                     "filename": filename
                                 }).encode('utf-8')
                                 session.client_socket.send(ack)
-                                session.device_info.pop("pending_file", None)
+                                session.pending_file = None
                         else:
                             # We are expecting JSON - try to decode one message
                             try:
@@ -682,7 +683,7 @@ class DemoServer:
             filename = message.get("filename", "unknown")
             file_size = message.get("size", 0)
             file_type = message.get("file_type", "image")
-            session.device_info["pending_file"] = {
+            session.pending_file = {
                 "filename": filename,
                 "size": file_size,
                 "type": file_type,
