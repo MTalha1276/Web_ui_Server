@@ -61,7 +61,7 @@ function updateDevices(devices) {
         const isSelected = currentDeviceSessionId === d.id;
         html += `<div class="device-card ${d.status === 'ONLINE' ? 'online' : 'offline'} ${isSelected ? 'selected' : ''}" data-id="${d.id}" data-status="${d.status}">
             <div class="dev-header">
-                <strong>#${d.id}</strong>
+                <strong>${d.model || d.id}</strong>
                 <span class="dev-status" style="color:${d.status === 'ONLINE' ? '#3fb950' : '#f85149'}">${d.status}</span>
             </div>
             <div class="dev-info">
@@ -76,8 +76,7 @@ function updateDevices(devices) {
     // Add click handlers to online devices only
     el.querySelectorAll('.device-card.online').forEach(card => {
         card.addEventListener('click', () => {
-            const deviceId = parseInt(card.dataset.id);
-            currentDeviceSessionId = deviceId;
+            currentDeviceSessionId = card.dataset.id;  // device_id is a string
             // Re-render to update selection highlighting
             updateDevices(devices);
         });

