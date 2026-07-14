@@ -57,8 +57,11 @@ header p { color: #8b949e; font-size: 0.8rem; }
     border-radius: 6px;
     border-left: 3px solid #888;
 }
-.device-card.online { border-left-color: #3fb950; }
-.device-card.offline { border-left-color: #f85149; }
+.device-card.online { border-left-color: #3fb950; cursor: pointer; transition: all 0.15s; }
+.device-card.online:hover { background-color: #21262d; transform: translateX(2px); }
+.device-card.offline { border-left-color: #f85149; opacity: 0.5; }
+.device-card.selected { border: 2px solid #58a6ff; background-color: #0d1f2d; box-shadow: 0 0 8px rgba(88,166,255,0.3); }
+.device-card.selected:hover { background-color: #112240; }
 .device-card .dev-header { display: flex; justify-content: space-between; font-size: 0.85rem; }
 .device-card .dev-status { font-weight: bold; }
 .device-card .dev-info { font-size: 0.75rem; color: #8b949e; margin-top: 4px; }

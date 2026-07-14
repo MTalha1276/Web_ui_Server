@@ -76,9 +76,22 @@ function updateDevices(devices) {
     // Add click handlers to online devices only
     el.querySelectorAll('.device-card.online').forEach(card => {
         card.addEventListener('click', () => {
-            currentDeviceSessionId = card.dataset.id;  // device_id is a string
-            // Re-render to update selection highlighting
-            updateDevices(devices);
+            const newId = card.dataset.id;
+            if (currentDeviceSessionId !== newId) {
+                currentDeviceSessionId = newId;
+                // Clear per-device UI state
+                selectedGalleryItem = null;
+                selectedFileItem = null;
+                selectedScreenshot = null;
+                fileBrowserHistory = [];
+                // Reset gallery/file/data views
+                document.getElementById('gallery-grid').innerHTML = '<p>Select a device and click "Gallery List" on dashboard first.</p>';
+                document.getElementById('filebrowser-list').innerHTML = '<p>Select a device and browse a path.</p>';
+                document.getElementById('data-viewer').innerHTML = '<p>Select a data type above to view data.</p>';
+                document.getElementById('screenshot-grid').innerHTML = '<p>No screenshots for this device. Take a screenshot from the dashboard first.</p>';
+                // Re-render to update selection highlighting
+                updateDevices(devices);
+            }
         });
     });
 
@@ -119,8 +132,12 @@ function updateStats(stats) {
 }
 
 function sendCommand(command, args) {
+    if (!currentDeviceSessionId) {
+        console.warn('No device selected — command not sent:', command);
+        return Promise.resolve({ status: 'error', error: 'No device selected. Please select a device from the dashboard.' });
+    }
     const body = { command, args: args || '{}' };
-    if (currentDeviceSessionId) body.session_id = currentDeviceSessionId;
+    body.session_id = currentDeviceSessionId;
     return fetch('/api/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -362,14 +379,14 @@ function setupReceivedFilesControls() {
 
 function loadReceivedFiles(subdir) {
     currentReceivedDir = subdir;
-    fetch('/api/received-files?dir=' + encodeURIComponent(subdir)).then(r => r.json()).then(data => {
+    fetch('/api/received-files?dir=' + encodeURIComponent(subdir) + '&session=' + currentDeviceSessionId).then(r => r.json()).then(data => {
         const container = document.getElementById('received-list');
         document.getElementById('received-path').textContent = '/' + (subdir || '');
         const files = data.files || [];
         if (!files.length) { container.innerHTML = '<p>No files in this directory.</p>'; return; }
         container.innerHTML = files.map(f => {
             const icon = f.is_dir ? '\u{1F4C1}' : getFileIcon(f.name);
-            const link = f.is_dir ? '' : `<a class="ri-link" href="/api/download-file?path=${encodeURIComponent(f.path)}" target="_blank">View/Download</a>`;
+            const link = f.is_dir ? '' : `<a class="ri-link" href="/api/download-file?path=${encodeURIComponent(f.path)}&session=${currentDeviceSessionId}" target="_blank">View/Download</a>`;
             return `<div class="received-item" data-path="${f.path}" data-isdir="${f.is_dir}">
                 <span class="ri-icon">${icon}</span>
                 <span class="ri-name">${f.name}</span>
@@ -569,7 +586,7 @@ function setupScreenshotControls() {
 let selectedScreenshot = null;
 
 function loadScreenshots() {
-    fetch('/api/screenshots')
+    fetch('/api/screenshots?session=' + currentDeviceSessionId)
         .then(r => r.json())
         .then(data => {
             const grid = document.getElementById('screenshot-grid');
@@ -580,7 +597,7 @@ function loadScreenshots() {
             }
             grid.innerHTML = screenshots.map(screenshot => {
                 return `<div class="screenshot-item" data-path="${screenshot.path}">
-                    <img src="/api/download-file?path=${encodeURIComponent(screenshot.path)}" alt="${screenshot.name}">
+                    <img src="/api/download-file?path=${encodeURIComponent(screenshot.path)}&session=${currentDeviceSessionId}" alt="${screenshot.name}">
                     <div class="screenshot-info">
                         <div class="filename">${screenshot.name}</div>
                         <div class="size">${formatSize(screenshot.size)}</div>
@@ -612,7 +629,7 @@ function loadScreenshots() {
                     const item = e.target.closest('.screenshot-item');
                     const path = item.dataset.path;
                     if (confirm(`Delete screenshot ${item.querySelector('.filename').textContent}?`)) {
-                        fetch('/api/delete-file?path=' + encodeURIComponent(path), { method: 'DELETE' })
+                        fetch('/api/delete-file?path=' + encodeURIComponent(path) + '&session=' + currentDeviceSessionId, { method: 'DELETE' })
                             .then(r => r.json())
                             .then(result => {
                                 if (result.status === 'success') {
@@ -650,7 +667,7 @@ function downloadSelectedScreenshot() {
     }
     // Trigger download by creating a temporary link
     const link = document.createElement('a');
-    link.href = '/api/download-file?path=' + encodeURIComponent(selectedScreenshot.path);
+    link.href = '/api/download-file?path=' + encodeURIComponent(selectedScreenshot.path) + '&session=' + currentDeviceSessionId;
     link.download = selectedScreenshot.name;
     document.body.appendChild(link);
     link.click();
@@ -664,7 +681,7 @@ function deleteSelectedScreenshot() {
         return;
     }
     if (confirm(`Delete screenshot ${selectedScreenshot.name}?`)) {
-        fetch('/api/delete-file?path=' + encodeURIComponent(selectedScreenshot.path), { method: 'DELETE' })
+        fetch('/api/delete-file?path=' + encodeURIComponent(selectedScreenshot.path) + '&session=' + currentDeviceSessionId, { method: 'DELETE' })
             .then(r => r.json())
             .then(result => {
                 if (result.status === 'success') {

