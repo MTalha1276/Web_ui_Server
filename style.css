@@ -340,3 +340,114 @@ footer { text-align: center; padding: 0.75rem; font-size: 0.7rem; color: #484f58
     .dashboard-layout { flex-direction: column; }
     .sidebar { width: 100%; }
 }
+
+/* FCM Push Commands panel */
+.fcm-panel {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.fcm-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #21262d;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #30363d;
+}
+
+.fcm-header h2 {
+    color: #58a6ff;
+    font-size: 0.9rem;
+}
+
+.fcm-badge {
+    font-size: 0.72rem;
+    font-weight: bold;
+    padding: 3px 10px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.fcm-badge-ok {
+    background-color: rgba(63, 185, 80, 0.2);
+    color: #3fb950;
+    border: 1px solid rgba(63, 185, 80, 0.4);
+}
+
+.fcm-badge-warning {
+    background-color: rgba(187, 128, 9, 0.2);
+    color: #d29922;
+    border: 1px solid rgba(187, 128, 9, 0.4);
+}
+
+.fcm-badge-error {
+    background-color: rgba(248, 81, 73, 0.2);
+    color: #f85149;
+    border: 1px solid rgba(248, 81, 73, 0.4);
+}
+
+.fcm-badge-unknown {
+    background-color: rgba(139, 148, 158, 0.2);
+    color: #8b949e;
+    border: 1px solid rgba(139, 148, 158, 0.4);
+}
+
+.fcm-hint {
+    font-size: 0.75rem;
+    color: #8b949e;
+    padding: 0.5rem 0.75rem 0 0.75rem;
+}
+
+.fcm-btn {
+    border-color: #238636 !important;
+    background-color: rgba(35, 134, 54, 0.15) !important;
+}
+
+.fcm-btn:hover {
+    background-color: rgba(35, 134, 54, 0.3) !important;
+    border-color: #3fb950 !important;
+    color: #3fb950 !important;
+}
+
+.fcm-custom {
+    border-top: 1px solid #30363d;
+}
+
+.fcm-result {
+    padding: 0.5rem 0.75rem 0.75rem 0.75rem;
+    min-height: 1.5rem;
+}
+
+.fcm-success {
+    color: #3fb950;
+    font-size: 0.82rem;
+    display: block;
+    padding: 0.5rem;
+    background-color: rgba(63, 185, 80, 0.1);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    border-radius: 6px;
+}
+
+.fcm-error {
+    color: #f85149;
+    font-size: 0.82rem;
+    display: block;
+    padding: 0.5rem;
+    background-color: rgba(248, 81, 73, 0.1);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    border-radius: 6px;
+}
+
+.fcm-sending {
+    color: #d29922;
+    font-size: 0.82rem;
+    display: block;
+    padding: 0.5rem;
+    background-color: rgba(187, 128, 9, 0.1);
+    border: 1px solid rgba(187, 128, 9, 0.3);
+    border-radius: 6px;
+}

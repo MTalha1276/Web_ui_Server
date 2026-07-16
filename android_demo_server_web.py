@@ -1493,7 +1493,7 @@ class ThreadedHTTPRequestHandler(BaseHTTPRequestHandler):
                 for device_id, session in self.server_instance.sessions.items():
                     if session.fcm_token:
                         tokens[device_id] = session.fcm_token
-        self.send_json_response({'tokens': tokens})
+        self.send_json_response({'tokens': tokens, 'fcm_configured': fcm_sender is not None})
 
     def handle_delete_file(self, query):
         """Delete a file from received_files directory."""

